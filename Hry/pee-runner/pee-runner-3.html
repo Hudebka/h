@@ -37,6 +37,11 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
+const SUPABASE_URL = "https://roxjuzctepcgqwtvbfxi.supabase.co";
+const SUPABASE_KEY = "TVŮJ_SB_PUBLISHABLE_KEY";
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  
 (function(){
   const canvas = document.getElementById('c');
   const overlay = document.getElementById('overlay');
