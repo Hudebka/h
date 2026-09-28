@@ -1,96 +1,38 @@
 
-/*
-    HUDebka – automatický zpěvník
-
-    Písničky jsou uložené jako TXT soubory v:
-    /pisnicky/
-
-    Formát TXT:
-
-    NÁZEV: Válečná
-    AUTOR: Alda
-
-    1.
-    Am                 G
-    Za kouřovou clonou při rachotu děl
-    Em                 Am
-    odehrávají se zvěrstva co svět neviděl
-
-    R.
-    Am
-    Tak nebuďte uražení
-    G
-    nehrajte si na kněze
-*/
-
-
-/* =========================================
-   SEZNAM PÍSNIČEK
-   ========================================= */
-
 const PISNICKY = [
-    "valecna.txt",
-    "maruska.txt"
+    "valecna.txt"
 ];
 
 
-/* =========================================
-   NAČTENÍ TXT
-   ========================================= */
-
 async function nactiPisnicku(soubor) {
 
-    const odpoved = await fetch(
-        "pisnicky/" + soubor
-    );
+    const odpoved = await fetch("pisnicky/" + soubor);
 
     if (!odpoved.ok) {
         throw new Error(
-            "Nepodařilo se načíst " + soubor
+            "TXT se nepodařilo načíst: " + soubor
         );
     }
 
     const text = await odpoved.text();
 
-    return zpracujPisnicku(text);
-}
-
-
-/* =========================================
-   ZPRACOVÁNÍ TXT
-   ========================================= */
-
-function zpracujPisnicku(text) {
-
     const radky = text
         .replace(/\r/g, "")
         .split("\n");
 
-
     let nazev = "Bez názvu";
     let autor = "";
-
-
-    /* -------------------------
-       NÁZEV A AUTOR
-       ------------------------- */
 
     for (const radek of radky) {
 
         if (radek.startsWith("NÁZEV:")) {
-            nazev = radek
-                .substring(6)
-                .trim();
+            nazev = radek.substring(6).trim();
         }
 
         if (radek.startsWith("AUTOR:")) {
-            autor = radek
-                .substring(6)
-                .trim();
+            autor = radek.substring(6).trim();
         }
-
     }
-
 
     return {
         nazev: nazev,
@@ -100,76 +42,65 @@ function zpracujPisnicku(text) {
 }
 
 
-/* =========================================
-   VYKRESLENÍ SEZNAMU PÍSNIČEK
-   ========================================= */
-
 async function zobrazSeznam() {
 
     const seznam =
         document.getElementById("seznamPisnicek");
 
-    if (!seznam) return;
-
+    if (!seznam) {
+        console.error("CHYBÍ #seznamPisnicek V INDEX.HTML");
+        return;
+    }
 
     seznam.innerHTML = "";
 
+    try {
 
-    for (const soubor of PISNICKY) {
+        const pisnicka =
+            await nactiPisnicku("valecna.txt");
 
-        try {
+        const karta =
+            document.createElement("div");
 
-            const pisnicka =
-                await nactiPisnicku(soubor);
+        karta.className = "card";
 
+        karta.innerHTML = `
+            <div class="icon">🎵</div>
 
-            const karta =
-                document.createElement("div");
+            <h3>${pisnicka.nazev}</h3>
 
-            karta.className = "card";
+            <p>${pisnicka.autor}</p>
 
+            <button class="button">
+                Zobrazit zpěvník
+            </button>
+        `;
 
-            karta.innerHTML = `
-                <div class="icon">🎵</div>
+        karta
+            .querySelector("button")
+            .addEventListener(
+                "click",
+                () => zobrazZpevnik(pisnicka)
+            );
 
-                <h3>${escapeHTML(pisnicka.nazev)}</h3>
+        seznam.appendChild(karta);
 
-                <p>
-                    ${escapeHTML(pisnicka.autor)}
-                </p>
-
-                <button class="button">
-                    Zobrazit zpěvník
-                </button>
-            `;
-
-
-            karta
-                .querySelector("button")
-                .addEventListener(
-                    "click",
-                    () => zobrazZpevnik(pisnicka)
-                );
-
-
-            seznam.appendChild(karta);
-
-        }
-
-        catch (chyba) {
-
-            console.error(chyba);
-
-        }
+        console.log("Písnička načtena:", pisnicka);
 
     }
+    catch (chyba) {
 
+        console.error("CHYBA PÍSNIČKY:", chyba);
+
+        seznam.innerHTML = `
+            <div class="card">
+                <h3>❌ Chyba</h3>
+                <p>${chyba.message}</p>
+            </div>
+        `;
+    }
 }
 
-
-/* =========================================
-   ZOBRAZENÍ ZPĚVNÍKU
-   ========================================= */
 
 function zobrazZpevnik(pisnicka) {
 
@@ -179,11 +110,7 @@ function zobrazZpevnik(pisnicka) {
     const obsah =
         document.getElementById("zpevnikObsah");
 
-
     obsah.innerHTML = "";
-
-
-    /* NÁZEV */
 
     const h1 =
         document.createElement("h1");
@@ -194,46 +121,33 @@ function zobrazZpevnik(pisnicka) {
     obsah.appendChild(h1);
 
 
-    /* AUTOR */
-
     if (pisnicka.autor) {
 
         const autor =
-            document.createElement("div");
-
-        autor.className = "subtitle";
+            document.createElement("p");
 
         autor.textContent =
             pisnicka.autor;
 
         obsah.appendChild(autor);
-
     }
 
-
-    /* KARTA */
 
     const karta =
         document.createElement("div");
 
-    karta.className = "song";
+    karta.className = "card";
 
 
     const text =
         document.createElement("div");
 
-    text.className = "song-text";
+    text.style.whiteSpace = "pre-wrap";
+    text.style.fontFamily = "monospace";
+    text.style.lineHeight = "1.6";
 
 
-    /* ZPRACOVÁNÍ ŘÁDKŮ */
-
-    for (let i = 0; i < pisnicka.radky.length; i++) {
-
-        const radek =
-            pisnicka.radky[i];
-
-
-        /* NÁZEV / AUTOR */
+    for (const radek of pisnicka.radky) {
 
         if (
             radek.startsWith("NÁZEV:") ||
@@ -242,174 +156,25 @@ function zobrazZpevnik(pisnicka) {
             continue;
         }
 
+        const radekElement =
+            document.createElement("div");
 
-        /* PRÁZDNÝ ŘÁDEK */
+        radekElement.textContent = radek;
 
-        if (radek.trim() === "") {
-
-            text.appendChild(
-                document.createElement("br")
-            );
-
-            continue;
-
-        }
-
-
-        /* SLOKA */
-
-        if (/^\d+\.$/.test(radek.trim())) {
-
-            const sloka =
-                document.createElement("span");
-
-            sloka.className = "refren";
-
-            sloka.textContent =
-                radek.trim();
-
-            text.appendChild(sloka);
-
-            text.appendChild(
-                document.createElement("br")
-            );
-
-            continue;
-
-        }
-
-
-        /* REFREN */
-
-        if (
-            radek.trim() === "R." ||
-            radek.trim() === "R"
-        ) {
-
-            const refren =
-                document.createElement("span");
-
-            refren.className = "refren";
-
-            refren.textContent = "R.";
-
-            text.appendChild(refren);
-
-            text.appendChild(
-                document.createElement("br")
-            );
-
-            continue;
-
-        }
-
-
-        /* AKORD */
-
-        if (jeAkordovyRadek(radek)) {
-
-            const akord =
-                document.createElement("span");
-
-            akord.className = "chord";
-
-            akord.textContent =
-                radek;
-
-            text.appendChild(akord);
-
-            text.appendChild(
-                document.createElement("br")
-            );
-
-            continue;
-
-        }
-
-
-        /* OBYČEJNÝ TEXT */
-
-        const textRadek =
-            document.createElement("span");
-
-        textRadek.className =
-            "lyrics-line";
-
-        textRadek.textContent =
-            radek;
-
-
-        text.appendChild(textRadek);
-
-        text.appendChild(
-            document.createElement("br")
-        );
-
+        text.appendChild(radekElement);
     }
 
 
     karta.appendChild(text);
-
     obsah.appendChild(karta);
-
-
-    /* ZOBRAZIT */
 
     okno.style.display = "block";
 
     okno.scrollIntoView({
         behavior: "smooth"
     });
-
 }
 
-
-/* =========================================
-   POZNÁNÍ AKORDOVÉHO ŘÁDKU
-   ========================================= */
-
-function jeAkordovyRadek(radek) {
-
-    const cisty =
-        radek.trim();
-
-    if (!cisty) return false;
-
-
-    const akordy =
-        cisty.split(/\s+/);
-
-
-    const povolene =
-        /^(A|B|C|D|E|F|G)(#|b)?(m|maj|mi|dim|aug|sus|7|maj7|m7|6|9)?$/;
-
-
-    return akordy.every(
-        akord => povolene.test(akord)
-    );
-
-}
-
-
-/* =========================================
-   BEZPEČNÝ TEXT
-   ========================================= */
-
-function escapeHTML(text) {
-
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-
-}
-
-
-/* =========================================
-   START
-   ========================================= */
 
 zobrazSeznam();
-```
+
