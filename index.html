@@ -3,12 +3,18 @@
 <html lang="cs">
 
 <head>
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <title>Hudebka</title>
 
+
 <style>
+
+/* =========================================
+   ZÁKLAD
+   ========================================= */
 
 * {
     box-sizing: border-box;
@@ -25,11 +31,18 @@ body {
     color: #eee;
 }
 
+
+/* =========================================
+   HLAVNÍ ÚVOD
+   ========================================= */
+
 header {
     min-height: 90vh;
+
     display: flex;
     align-items: center;
     justify-content: center;
+
     text-align: center;
 
     background:
@@ -49,21 +62,40 @@ header {
     margin: 15px 0 35px;
 }
 
+
+/* =========================================
+   TLAČÍTKA
+   ========================================= */
+
 .button {
     display: inline-block;
+
     padding: 14px 28px;
+
     border-radius: 30px;
+
     background: #e63946;
     color: white;
+
     text-decoration: none;
     font-weight: bold;
+
     transition: .2s;
+
+    border: none;
+    cursor: pointer;
+    font-size: 15px;
 }
 
 .button:hover {
     transform: scale(1.05);
     background: #ff4d5a;
 }
+
+
+/* =========================================
+   NAVIGACE
+   ========================================= */
 
 nav {
     position: sticky;
@@ -89,6 +121,11 @@ nav a:hover {
     color: white;
 }
 
+
+/* =========================================
+   SEKCE
+   ========================================= */
+
 section {
     max-width: 1100px;
     margin: auto;
@@ -100,17 +137,28 @@ h2 {
     margin-top: 0;
 }
 
+
+/* =========================================
+   KARTY
+   ========================================= */
+
 .cards {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+
+    grid-template-columns:
+        repeat(auto-fit, minmax(220px, 1fr));
+
     gap: 20px;
 }
 
 .card {
     background: #1c1c1c;
+
     border: 1px solid #333;
     border-radius: 16px;
+
     padding: 25px;
+
     transition: .2s;
 }
 
@@ -133,7 +181,10 @@ h2 {
     line-height: 1.5;
 }
 
-/* PEE RUNNER */
+
+/* =========================================
+   PEE RUNNER
+   ========================================= */
 
 .pee-card {
     overflow: hidden;
@@ -141,9 +192,12 @@ h2 {
 
 .pee-card .leaderboard {
     float: right;
+
     width: 40%;
+
     margin-left: 30px;
     padding-left: 20px;
+
     border-left: 1px solid #333;
 }
 
@@ -154,9 +208,13 @@ h2 {
 
 .score-row {
     display: flex;
+
     justify-content: space-between;
+
     gap: 15px;
+
     padding: 7px 0;
+
     color: #bbb;
 }
 
@@ -165,11 +223,84 @@ h2 {
     color: #eee;
 }
 
-/* AKTUALITY */
+
+/* =========================================
+   PÍSNIČKY
+   ========================================= */
+
+#seznamPisnicek {
+    display: grid;
+
+    grid-template-columns:
+        repeat(auto-fit, minmax(220px, 1fr));
+
+    gap: 20px;
+}
+
+
+/* =========================================
+   ZPĚVNÍK
+   ========================================= */
+
+#zpevnik {
+    margin-top: 50px;
+}
+
+.song {
+    background: #1c1c1c;
+
+    border: 1px solid #333;
+    border-radius: 16px;
+
+    padding: 35px;
+}
+
+.song h1 {
+    margin-top: 0;
+}
+
+.song-text {
+    font-family: Arial, sans-serif;
+
+    font-size: 18px;
+    line-height: 1.7;
+
+    white-space: pre-wrap;
+}
+
+.chord {
+    color: #e63946;
+    font-weight: bold;
+
+    display: block;
+}
+
+.lyrics-line {
+    display: block;
+
+    padding-left: 35px;
+}
+
+.refren {
+    display: inline-block;
+
+    color: #888;
+    font-weight: bold;
+
+    margin-top: 25px;
+    margin-bottom: 5px;
+}
+
+
+/* =========================================
+   AKTUALITY
+   ========================================= */
 
 .news {
     border-left: 3px solid #e63946;
+
     padding-left: 20px;
+
     margin-bottom: 25px;
 }
 
@@ -181,13 +312,57 @@ h2 {
     margin-bottom: 5px;
 }
 
-/* PATIČKA */
+
+/* =========================================
+   PATIČKA
+   ========================================= */
 
 footer {
     text-align: center;
+
     padding: 40px 20px;
+
     color: #777;
+
     border-top: 1px solid #292929;
+}
+
+
+/* =========================================
+   MOBIL
+   ========================================= */
+
+@media (max-width: 600px) {
+
+    section {
+        padding: 60px 15px;
+    }
+
+    nav {
+        gap: 15px;
+    }
+
+    .pee-card .leaderboard {
+        float: none;
+
+        width: 100%;
+
+        margin: 0 0 25px;
+        padding: 0 0 20px;
+
+        border-left: none;
+        border-bottom: 1px solid #333;
+    }
+
+    .song {
+        padding: 20px;
+    }
+
+    .song-text {
+        font-size: 16px;
+        line-height: 1.6;
+    }
+
 }
 
 </style>
@@ -198,6 +373,10 @@ footer {
 <body>
 
 
+<!-- =========================================
+     ÚVOD
+     ========================================= -->
+
 <header>
 
     <div class="hero">
@@ -205,7 +384,8 @@ footer {
         <h1>H.U.D.E.B.K.A.</h1>
 
         <p>
-            Hudební Uskupení Dokonalých Emocionálně Bláznivých Kvalitních Alkoholiků
+            Hudební Uskupení Dokonalých Emocionálně
+            Bláznivých Kvalitních Alkoholiků
         </p>
 
         <a class="button" href="#hry">
@@ -217,6 +397,10 @@ footer {
 </header>
 
 
+<!-- =========================================
+     NAVIGACE
+     ========================================= -->
+
 <nav>
 
     <a href="#hry">Hry</a>
@@ -227,6 +411,10 @@ footer {
 
 </nav>
 
+
+<!-- =========================================
+     HRY
+     ========================================= -->
 
 <section id="hry">
 
@@ -246,13 +434,23 @@ footer {
 
             </div>
 
-            <div class="icon">🏃Pee Runner</div>
+
+            <div class="icon">
+                🏃 Pee Runner
+            </div>
+
 
             <p>
-                
+                Naše první hra.
+                Běž, vyhýbej se překážkám
+                a pokus se přežít.
             </p>
 
-            <a class="button" href="Hry/pee-runner/pee-runner-3.html">
+
+            <a
+                class="button"
+                href="Hry/pee-runner/pee-runner-3.html"
+            >
                 Hrát
             </a>
 
@@ -263,24 +461,56 @@ footer {
 </section>
 
 
-<div id="seznamPisnicek"></div>
+<!-- =========================================
+     PÍSNIČKY
+     ========================================= -->
 
-<div id="zpevnik" style="display:none;">
-    <div id="zpevnikObsah"></div>
-</div>
+<section id="pisnicky">
 
-<script src="pisnicky.js"></script>
+    <h2>🎵 Písničky</h2>
 
+
+    <!--
+        SEM JAVASCRIPT AUTOMATICKY VLOŽÍ KARTY
+        PÍSNIČEK
+    -->
+
+    <div id="seznamPisnicek"></div>
+
+
+    <!--
+        SEM JAVASCRIPT VLOŽÍ ZPĚVNÍK
+    -->
+
+    <div id="zpevnik" style="display:none;">
+
+        <div id="zpevnikObsah"></div>
+
+    </div>
+
+</section>
+
+
+<!-- =========================================
+     AKTUALITY
+     ========================================= -->
 
 <section id="novinky">
 
     <h2>📰 Aktuality</h2>
 
+
     <div class="news">
 
-        <small>25. 9. 2026</small>
+        <small>
+            25. 9. 2026
+        </small>
 
-        <h3>Hudebka je v plenkách</h3>
+
+        <h3>
+            Hudebka je v plenkách
+        </h3>
+
 
         <p>
             Web právě vzniká a tohle je teprve začátek.
@@ -293,6 +523,10 @@ footer {
 </section>
 
 
+<!-- =========================================
+     PATIČKA
+     ========================================= -->
+
 <footer>
 
     © 2026 Hudebka
@@ -300,7 +534,12 @@ footer {
 </footer>
 
 
+<!-- =========================================
+     SUPABASE
+     ========================================= -->
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 
 <script>
 
@@ -310,25 +549,41 @@ const SUPABASE_URL =
 const SUPABASE_KEY =
     "sb_publishable_2tx7xGmhpxD-X9UZ2l39aA_eCaPeWx5";
 
-const db = supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_KEY
-);
+
+const db =
+    supabase.createClient(
+        SUPABASE_URL,
+        SUPABASE_KEY
+    );
 
 
 async function nactiPeeLeaderboard() {
 
     const leaderboard =
-        document.getElementById("peeLeaderboard");
+        document.getElementById(
+            "peeLeaderboard"
+        );
+
 
     try {
 
-        const { data, error } = await db
-            .from("scores")
-            .select("player_name, score")
-            .eq("game", "pee-runner")
-            .order("score", { ascending: false })
-            .limit(3);
+        const { data, error } =
+            await db
+                .from("scores")
+                .select(
+                    "player_name, score"
+                )
+                .eq(
+                    "game",
+                    "pee-runner"
+                )
+                .order(
+                    "score",
+                    {
+                        ascending: false
+                    }
+                )
+                .limit(3);
 
 
         if (error) {
@@ -357,34 +612,48 @@ async function nactiPeeLeaderboard() {
         leaderboard.innerHTML = "";
 
 
-        data.forEach((hrac, index) => {
+        data.forEach(
+            (hrac, index) => {
 
-            const row =
-                document.createElement("div");
-
-            row.className = "score-row";
-
-
-            row.innerHTML = `
-                <span>
-                    ${index + 1}. ${hrac.player_name}
-                </span>
-
-                <span>
-                    ${hrac.score}
-                </span>
-            `;
+                const row =
+                    document.createElement(
+                        "div"
+                    );
 
 
-            leaderboard.appendChild(row);
+                row.className =
+                    "score-row";
 
-        });
+
+                row.innerHTML = `
+
+                    <span>
+                        ${index + 1}.
+                        ${hrac.player_name}
+                    </span>
+
+                    <span>
+                        ${hrac.score}
+                    </span>
+
+                `;
+
+
+                leaderboard.appendChild(
+                    row
+                );
+
+            }
+        );
 
     }
 
     catch (err) {
 
-        console.error("Chyba:", err);
+        console.error(
+            "Chyba:",
+            err
+        );
 
         leaderboard.textContent =
             "Chyba načítání žebříčku.";
@@ -399,5 +668,13 @@ nactiPeeLeaderboard();
 </script>
 
 
+<!-- =========================================
+     PÍSNIČKY – JAVASCRIPT
+     ========================================= -->
+
+<script src="pisnicky.js"></script>
+
+
 </body>
 </html>
+
