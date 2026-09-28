@@ -1,6 +1,7 @@
+```html
 <!DOCTYPE html>
-
 <html lang="cs">
+
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
 <title>Hudebka</title>
 
 <style>
+
 * {
     box-sizing: border-box;
 }
@@ -131,7 +133,13 @@ h2 {
     line-height: 1.5;
 }
 
-.leaderboard {
+/* PEE RUNNER */
+
+.pee-card {
+    overflow: hidden;
+}
+
+.pee-card .leaderboard {
     float: right;
     width: 40%;
     margin-left: 30px;
@@ -139,19 +147,7 @@ h2 {
     border-left: 1px solid #333;
 }
 
-.card::after {
-    content: "";
-    display: block;
-    clear: both;
-}
-    
-.card {
-    display: flex;
-    align-items: center;
-    gap: 30px;
-}
-
-.leaderboard h4 {
+.pee-card .leaderboard h4 {
     margin: 0 0 12px;
     font-size: 18px;
 }
@@ -169,6 +165,8 @@ h2 {
     color: #eee;
 }
 
+/* AKTUALITY */
+
 .news {
     border-left: 3px solid #e63946;
     padding-left: 20px;
@@ -183,6 +181,8 @@ h2 {
     margin-bottom: 5px;
 }
 
+/* PATIČKA */
+
 footer {
     text-align: center;
     padding: 40px 20px;
@@ -190,137 +190,136 @@ footer {
     border-top: 1px solid #292929;
 }
 
-@media (max-width: 600px) {
-    .leaderboard {
-        float: none;
-        width: 100%;
-        margin: 25px 0 0 0;
-        padding: 20px 0 0 0;
-        border-left: none;
-        border-top: 1px solid #333;
-    }
-}
 </style>
 
 </head>
 
+
 <body>
 
+
 <header>
+
     <div class="hero">
 
-```
-    <h1>H.U.D.E.B.K.A.</h1>
+        <h1>H.U.D.E.B.K.A.</h1>
 
-    <p>
-        Hudební Uskupení Dokonalých Emocionálně Bláznivých Kvalitních Alkoholiků
-    </p>
+        <p>
+            Hudební Uskupení Dokonalých Emocionálně Bláznivých Kvalitních Alkoholiků
+        </p>
 
-    <a class="button" href="#hry">
-        Prozkoumat
-    </a>
+        <a class="button" href="#hry">
+            Prozkoumat
+        </a>
 
-</div>
-```
+    </div>
 
 </header>
 
+
 <nav>
+
     <a href="#hry">Hry</a>
+
     <a href="#pisnicky">Písničky</a>
+
     <a href="#novinky">Aktuality</a>
+
 </nav>
+
 
 <section id="hry">
 
-```
-<h2>🎮 Hry</h2>
+    <h2>🎮 Hry</h2>
 
-<div class="cards">
+    <div class="cards">
 
-    <div class="card">
+        <div class="card pee-card">
 
-        <div class="icon">🏃</div>
+            <div class="leaderboard">
 
-        <h3>Pee Runner</h3>
+                <h4>🏆 TOP 3</h4>
 
-        <p>
-            Naše první hra.
-            Běž, vyhýbej se překážkám a pokus se přežít.
-        </p>
+                <div id="peeLeaderboard">
+                    Načítám...
+                </div>
 
-        <a class="button" href="Hry/pee-runner/pee-runner-3.html">
-            Hrát
-        </a>
-
-        <div class="leaderboard">
-
-            <h4>🏆 TOP 3</h4>
-
-            <div id="peeLeaderboard">
-                Načítám...
             </div>
+
+            <div class="icon">🏃</div>
+
+            <h3>Pee Runner</h3>
+
+            <p>
+                Naše první hra.
+                Běž, vyhýbej se překážkám a pokus se přežít.
+            </p>
+
+            <a class="button" href="Hry/pee-runner/pee-runner-3.html">
+                Hrát
+            </a>
 
         </div>
 
     </div>
 
-</div>
-```
-
 </section>
+
 
 <section id="pisnicky">
 
-```
-<h2>🎵 Písničky</h2>
+    <h2>🎵 Písničky</h2>
 
-<div class="card">
+    <div class="card">
 
-    <h3>Alda - Válečná</h3>
+        <h3>Alda - Válečná</h3>
 
-    <a class="button" href="pisnicky/valecna.html">
-        Zobrazit
-    </a>
+        <a class="button" href="pisnicky/valecna.html">
+            Zobrazit
+        </a>
 
-</div>
-```
+    </div>
 
 </section>
+
 
 <section id="novinky">
 
-```
-<h2>📰 Aktuality</h2>
+    <h2>📰 Aktuality</h2>
 
-<div class="news">
+    <div class="news">
 
-    <small>25. 9. 2026</small>
+        <small>25. 9. 2026</small>
 
-    <h3>Hudebka je v plenkách</h3>
+        <h3>Hudebka je v plenkách</h3>
 
-    <p>
-        Web právě vzniká a tohle je teprve začátek.
-        Postupně sem budeme přidávat naše hry
-        a další projekty.
-    </p>
+        <p>
+            Web právě vzniká a tohle je teprve začátek.
+            Postupně sem budeme přidávat naše hry
+            a další projekty.
+        </p>
 
-</div>
-```
+    </div>
 
 </section>
 
+
 <footer>
+
     © 2026 Hudebka
+
 </footer>
+
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script>
 
-const SUPABASE_URL = "https://roxjuzctepcgqwtvbfxi.supabase.co";
+const SUPABASE_URL =
+    "https://roxjuzctepcgqwtvbfxi.supabase.co";
 
-const SUPABASE_KEY = "sb_publishable_2tx7xGmhpxD-X9UZ2l39aA_eCaPeWx5";
+const SUPABASE_KEY =
+    "sb_publishable_2tx7xGmhpxD-X9UZ2l39aA_eCaPeWx5";
 
 const db = supabase.createClient(
     SUPABASE_URL,
@@ -330,53 +329,86 @@ const db = supabase.createClient(
 
 async function nactiPeeLeaderboard() {
 
-    const leaderboard = document.getElementById("peeLeaderboard");
+    const leaderboard =
+        document.getElementById("peeLeaderboard");
 
-    const { data, error } = await db
-        .from("scores")
-        .select("player_name, score")
-        .eq("game", "pee-runner")
-        .order("score", { ascending: false })
-        .limit(3);
+    try {
 
-    if (error) {
+        const { data, error } = await db
+            .from("scores")
+            .select("player_name, score")
+            .eq("game", "pee-runner")
+            .order("score", { ascending: false })
+            .limit(3);
 
-        console.error("Chyba při načítání leaderboardu:", error);
 
-        leaderboard.textContent = "Žebříček se nepodařilo načíst.";
+        if (error) {
 
-        return;
+            console.error(
+                "Chyba při načítání leaderboardu:",
+                error
+            );
+
+            leaderboard.textContent =
+                "Žebříček se nepodařilo načíst.";
+
+            return;
+        }
+
+
+        if (!data || data.length === 0) {
+
+            leaderboard.textContent =
+                "Zatím žádné skóre.";
+
+            return;
+        }
+
+
+        leaderboard.innerHTML = "";
+
+
+        data.forEach((hrac, index) => {
+
+            const row =
+                document.createElement("div");
+
+            row.className = "score-row";
+
+
+            row.innerHTML = `
+                <span>
+                    ${index + 1}. ${hrac.player_name}
+                </span>
+
+                <span>
+                    ${hrac.score}
+                </span>
+            `;
+
+
+            leaderboard.appendChild(row);
+
+        });
+
     }
 
-    if (!data || data.length === 0) {
+    catch (err) {
 
-        leaderboard.textContent = "Zatím žádné skóre.";
+        console.error("Chyba:", err);
 
-        return;
+        leaderboard.textContent =
+            "Chyba načítání žebříčku.";
+
     }
 
-    leaderboard.innerHTML = "";
-
-    data.forEach((hrac, index) => {
-
-        const row = document.createElement("div");
-
-        row.className = "score-row";
-
-        row.innerHTML = `
-            <span>${index + 1}. ${hrac.player_name}</span>
-            <span>${hrac.score}</span>
-        `;
-
-        leaderboard.appendChild(row);
-
-    });
 }
 
 
 nactiPeeLeaderboard();
 
 </script>
+
 
 </body>
 </html>
