@@ -103,6 +103,29 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   const CHASE_DURATION = 4;
 
   let best = 0;
+
+  async function nactiBest() {
+
+    const { data, error } = await db
+        .from("scores")
+        .select("score")
+        .eq("game", "pee-runner")
+        .order("score", { ascending: false })
+        .limit(1);
+
+    if (error) {
+        console.error("Chyba při načítání nejlepšího skóre:", error);
+        return;
+    }
+
+    if (data && data.length > 0) {
+        best = data[0].score;
+        bestEl.textContent = best;
+    }
+}
+
+nactiBest();
+  
   try{ best = parseInt(localStorage.getItem('punkRunnerBest3D')||'0',10) || 0; }catch(e){}
   bestEl.textContent = best;
 
