@@ -14,6 +14,9 @@
 
 <p id="vysledek"></p>
 
+<h2>🏆 Žebříček</h2>
+<div id="zebricek">Načítám...</div>
+    
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script>
@@ -48,6 +51,38 @@ async function ulozSkore() {
     document.getElementById("vysledek").textContent =
         "Skóre uloženo!";
 }
+
+async function nactiZebricek() {
+
+    const { data, error } = await db
+        .from("scores")
+        .select("player_name, score, created_at")
+        .order("score", { ascending: false })
+        .limit(10);
+
+    if (error) {
+        console.error(error);
+        document.getElementById("zebricek").textContent =
+            "CHYBA: " + error.message;
+        return;
+    }
+
+    const seznam = document.getElementById("zebricek");
+
+    seznam.innerHTML = "";
+
+    data.forEach((hrac, index) => {
+
+        const radek = document.createElement("div");
+
+        radek.textContent =
+            `${index + 1}. ${hrac.player_name} — ${hrac.score}`;
+
+        seznam.appendChild(radek);
+    });
+}
+
+nactiZebricek();
 </script>
 
 </body>
