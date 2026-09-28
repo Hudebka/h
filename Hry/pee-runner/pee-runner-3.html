@@ -34,6 +34,7 @@
   </div>
   <div id="hitFlash">PRÁSK!</div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function(){
@@ -46,6 +47,11 @@
   const coinsEl = document.getElementById('coins');
   const bottlesEl = document.getElementById('bottles');
 
+  const SUPABASE_URL = "https://roxjuzctepcgqwtvbfxi.supabase.co";
+  const SUPABASE_KEY = "sb_publishable_2tx7xGmhpxD-X9UZ2l39aA_eCaPeWx5";
+
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  
   let W,H;
   let scene, camera, renderer;
   const laneX = [-2.3, 0, 2.3];
@@ -1490,9 +1496,31 @@
   }
   startBtn.addEventListener('click', requestStart);
 
+  async function ulozSkore(total) {
+
+    const jmeno = prompt("Zadej svoje jméno:");
+
+    if (!jmeno) return;
+
+    const { error } = await db
+        .from("scores")
+        .insert([
+            {
+                player_name: jmeno,
+                score: total,
+                game: "pee-runner"
+            }
+        ]);
+
+    if (error) {
+        console.error("Chyba při ukládání skóre:", error);
+    }
+}
+  
   function endGame(){
     running = false;
     const total = score;
+    ulozSkore(total);
     if(total>best){ best=total; try{localStorage.setItem('punkRunnerBest3D', String(best));}catch(e){} }
     bestEl.textContent = best;
     let reason = '';
