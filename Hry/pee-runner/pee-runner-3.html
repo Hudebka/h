@@ -1540,7 +1540,7 @@ nactiBest();
         console.error("Chyba při ukládání skóre:", error);
     }
 }
-  
+  /*
   function endGame(){
     running = false;
     const total = score;
@@ -1548,13 +1548,60 @@ nactiBest();
     if(total>best){ best=total; try{localStorage.setItem('punkRunnerBest3D', String(best));}catch(e){} }
     bestEl.textContent = best;
     let reason = '';
-    if(bustType==='puddle') reason = 'Spadl jsi do louže a chytil tě policajt!  •  ';
-    else if(bustType==='car') reason = 'Naboural jsi policejní auto!  •  ';
+    //if(bustType==='puddle') reason = 'Spadl jsi do louže a chytil tě policajt!  •  ';
+    //else if(bustType==='car') reason = 'Naboural jsi policejní auto!  •  ';
     msg.textContent = reason+'GAME OVER  •  Skore: '+total+'  •  Nejlepsi: '+best;
     startBtn.textContent = 'HRAT ZNOVU';
     overlay.classList.remove('hidden');
   }
+*/
 
+  async function endGame(){
+    running = false;
+
+    const total = score;
+
+    // Uložení aktuálního skóre
+    await ulozSkore(total);
+
+    // Lokální best můžeme dál aktualizovat
+    if(total > best){
+        best = total;
+        try{
+            localStorage.setItem('punkRunnerBest3D', String(best));
+        }catch(e){}
+    }
+
+    bestEl.textContent = best;
+
+    // Načtení TOP 3
+    const { data, error } = await db
+        .from("scores")
+        .select("player_name, score")
+        .eq("game", "pee-runner")
+        .order("score", { ascending: false })
+        .limit(3);
+
+    let top3 = "";
+
+    if(!error && data){
+        data.forEach((hrac, index) => {
+            top3 += `${index + 1}. ${hrac.player_name} — ${hrac.score}<br>`;
+        });
+    }
+
+    msg.innerHTML =
+        `<strong>Tvoje skóre: ${total}</strong>
+        <br><br>
+        <strong>🏆 TOP 3</strong>
+        <br>
+        ${top3}`;
+
+    startBtn.textContent = 'HRÁT ZNOVU';
+    overlay.classList.remove('hidden');
+}
+
+  
   let lastT=0;
   function loop(t_now){
     if(!running) return;
@@ -1574,7 +1621,7 @@ nactiBest();
 
     T += dt;
 
-    moveSpeed += dt*0.06;
+    moveSpeed += dt*0.1;
     if(moveSpeed>15) moveSpeed=15;
     dist += moveSpeed*dt;
 
