@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <title>Supabase test</title>
+</head>
+<body>
+
+<h1>Test skóre</h1>
+
+<input id="jmeno" placeholder="Tvoje jméno">
+<input id="skore" type="number" placeholder="Skóre">
+<button onclick="ulozSkore()">Uložit skóre</button>
+
+<p id="vysledek"></p>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+const SUPABASE_URL = "https://roxjuzctepcgqwtvbfxi.supabase.co";
+
+const SUPABASE_KEY = "sb_publishable_2tx7xGmhpxD-X9UZ2l39aA_eCaPeWx5";
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+async function ulozSkore() {
+
+    const jmeno = document.getElementById("jmeno").value;
+    const skore = Number(document.getElementById("skore").value);
+
+    const { data, error } = await db
+        .from("scores")
+        .insert([
+            {
+                player_name: jmeno,
+                score: skore,
+                game: "test"
+            }
+        ]);
+
+    if (error) {
+        console.error(error);
+        document.getElementById("vysledek").textContent =
+            "CHYBA: " + error.message;
+        return;
+    }
+
+    document.getElementById("vysledek").textContent =
+        "Skóre uloženo!";
+}
+</script>
+
+</body>
+</html>
