@@ -339,4 +339,19 @@ async function nactiPeeLeaderboard() {
         row.className = "score-row";
 
         row.innerHTML = `
-            <span>
+            <span>${index + 1}. ${hrac.player_name}</span>
+            <span>${hrac.score}</span>
+        `;
+
+        leaderboard.appendChild(row);
+
+    });
+}
+
+
+nactiPeeLeaderboard();
+
+</script>
+
+</body>
+</html>
