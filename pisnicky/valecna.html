@@ -1,26 +1,212 @@
-Tady zatim nic neni... Ale bude tu text a akordy - Valecna
-
-
+```html
 <!DOCTYPE html>
 <html lang="cs">
+
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<title>Hudebka</title>
+<title>Válečná – Hudebka</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #111;
+    color: #eee;
+}
+
+
+/* NAVIGACE */
+
+nav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+
+    padding: 18px;
+
+    background: rgba(15,15,15,.95);
+    border-bottom: 1px solid #333;
+}
+
+nav a {
+    color: #ccc;
+    text-decoration: none;
+}
+
+nav a:hover {
+    color: white;
+}
+
+
+/* HLAVNÍ OBSAH */
+
+section {
+    max-width: 900px;
+    margin: auto;
+    padding: 60px 20px;
+}
+
+h1 {
+    font-size: 48px;
+    margin: 0 0 10px;
+}
+
+.subtitle {
+    color: #888;
+    margin-bottom: 35px;
+}
+
+
+/* KARTA PÍSNIČKY */
+
+.song {
+    background: #1c1c1c;
+    border: 1px solid #333;
+    border-radius: 16px;
+    padding: 35px;
+}
+
+
+/* TEXT A AKORDY */
+
+.song-text {
+    white-space: pre-wrap;
+    font-family: Arial, sans-serif;
+    font-size: 18px;
+    line-height: 1.7;
+}
+
+.chord {
+    color: #e63946;
+    font-weight: bold;
+}
+
+
+/* REFREN */
+
+.refren {
+    color: #888;
+    font-weight: bold;
+    margin: 25px 0 5px;
+}
+
+
+/* ZPĚT */
+
+.button {
+    display: inline-block;
+    padding: 12px 24px;
+    border-radius: 30px;
+    background: #e63946;
+    color: white;
+    text-decoration: none;
+    font-weight: bold;
+    margin-bottom: 30px;
+}
+
+.button:hover {
+    background: #ff4d5a;
+}
+
+
+/* PATIČKA */
+
+footer {
+    text-align: center;
+    padding: 40px 20px;
+    color: #777;
+    border-top: 1px solid #292929;
+}
+
+
+/* MOBIL */
+
+@media (max-width: 600px) {
+
+    section {
+        padding: 40px 15px;
+    }
+
+    h1 {
+        font-size: 38px;
+    }
+
+    .song {
+        padding: 20px;
+    }
+
+    .song-text {
+        font-size: 16px;
+        line-height: 1.6;
+    }
+
+    nav {
+        gap: 15px;
+    }
+
+}
+
+</style>
+
 </head>
 
-<body>
-    
 
- 	<p1>Am G Em Am
+<body>
+
+
+<nav>
+
+    <a href="../index.html#hry">Hry</a>
+
+    <a href="../index.html#pisnicky">Písničky</a>
+
+    <a href="../index.html#novinky">Aktuality</a>
+
+</nav>
+
+
+<section>
+
+    <a class="button" href="../index.html#pisnicky">
+        ← Zpět na písničky
+    </a>
+
+
+    <h1>Válečná</h1>
+
+    <div class="subtitle">
+        Alda
+    </div>
+
+
+    <div class="song">
+
+        <div class="song-text">
+
+<span class="chord">Am  G  Em  Am</span>
 Za kouřovou clonou při rachotu děl
 odehrávají se zvěrstva co svět neviděl
 Z krajiny teď zbyla jenom prázdná pustina
 a z velkých armád na ní poslední družina
 
-R
-Am G Em Am
+<div class="refren">R</div>
+
+<span class="chord">Am  G  Em  Am</span>
 Tak nebuďte uražení
 nehrajte si na kněze
 válka má jen poražený
@@ -31,12 +217,14 @@ se vám nakupil
 realitu nevidíte
 jen klam vás oslepil
 
+<span class="chord">Am  G  Em  Am</span>
 Diktátoři rozehráli svojí další partii
 klid teď mají jen ti šťastní co už nežijí
 Za velikým stolem rozhodují o smrti
 moc nad bitevním polem ta je pohltí
 
-R
+<div class="refren">R</div>
+
 Tak nebuďte uražení
 nehrajte si na kněze
 válka má jen poražený
@@ -47,14 +235,28 @@ se vám nakupil
 realitu nevidíte
 jen klam vás oslepil
 
+<span class="chord">Am  G  Em  Am</span>
 Za zavřenými dveřmi pokračují v partii
 Jen pěšáci docházejí ti už dávno nežijí
 Rozedřený ruce mají jak tahají za nitky
-Lidi na smrt posílají jako nějaký dobytky</p1>
+Lidi na smrt posílají jako nějaký dobytky
+
+        </div>
+
+    </div>
+
+</section>
+
 
 <footer>
     © 2026 Hudebka
 </footer>
 
+
 </body>
 </html>
+```
+
+Takhle bude `Válečná` působit jako **součást stejného webu**, ne jako samostatná obyčejná HTML stránka.
+
+Jen jedna věc: v původním textu jsou akordy uvedené jen na začátku jednotlivých částí. **Nedoplňoval jsem je tam, kde jsi je neměl**, takže jsem si nevymýšlel, kam mají při hraní přijít.
