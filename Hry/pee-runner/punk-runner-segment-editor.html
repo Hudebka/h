@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Punk Runner — Editor segmentů</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#15181d; --panel2:#1c2027; --line:#2a2f38;
+    --txt:#eef0f2; --sub:#8b93a1; --accent:#39ff6a; --accent-d:#1fbf50;
+    --coin:#ffd83d; --bottle:#2e7d32; --puddle:#3aa0e0; --car:#e05a3a; --carf:#a83aca;
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+    box-sizing:border-box;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0; background:var(--bg); color:var(--txt); font-family:'Segoe UI',Arial,sans-serif; -webkit-user-select:none; user-select:none;}
+  body{padding:14px 14px 40px; max-width:720px; margin:0 auto;}
+  h1{font-size:19px; margin:4px 0 2px;}
+  .sub{color:var(--sub); font-size:12.5px; margin:0 0 16px; line-height:1.5;}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:14px;}
+  .row{display:flex; gap:10px; flex-wrap:wrap;}
+  .field{display:flex; flex-direction:column; gap:4px; flex:1 1 100px;}
+  .field label{font-size:11.5px; color:var(--sub); font-weight:600; text-transform:uppercase; letter-spacing:.03em;}
+  input[type=text], input[type=number]{
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px; color:var(--txt);
+    padding:9px 10px; font-size:15px; width:100%; -webkit-user-select:text; user-select:text;
+  }
+  .legend{display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;}
+  .chip{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--sub); background:var(--panel2); border:1px solid var(--line); border-radius:20px; padding:5px 10px 5px 6px;}
+  .dot{width:14px; height:14px; border-radius:4px; flex:none;}
+  .lanehead{display:grid; grid-template-columns:52px repeat(3,1fr); gap:6px; margin:14px 0 6px; font-size:11.5px; color:var(--sub); font-weight:700; text-align:center;}
+  .grid{display:flex; flex-direction:column; gap:6px; max-height:52vh; overflow-y:auto; padding:2px; border-radius:10px;}
+  .gridrow{display:grid; grid-template-columns:52px repeat(3,1fr); gap:6px; align-items:stretch;}
+  .zlabel{display:flex; align-items:center; justify-content:center; font-size:12px; color:var(--sub); font-variant-numeric:tabular-nums;}
+  .cell{
+    position:relative; height:52px; border-radius:10px; border:1px solid var(--line); background:var(--panel2);
+    display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800; color:#0a0a0a;
+    cursor:pointer; transition:transform .08s ease;
+  }
+  .cell:active{transform:scale(0.94);}
+  .cell.t-empty{background:var(--panel2); color:var(--sub); font-weight:600;}
+  .cell.t-coin{background:var(--coin);}
+  .cell.t-bottle{background:var(--bottle); color:#eafff0;}
+  .cell.t-puddle{background:var(--puddle); color:#eafbff;}
+  .cell.t-car{background:var(--car); color:#fff0ea;}
+  .cell.t-car_flipped{background:var(--carf); color:#fbeaff;}
+  .cell .flip-badge{position:absolute; top:3px; right:5px; font-size:10px;}
+  .toolbar{display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;}
+  button{
+    font-family:inherit; font-weight:800; font-size:14px; border:none; border-radius:10px;
+    padding:11px 16px; cursor:pointer;
+  }
+  .btn-main{background:linear-gradient(135deg,var(--accent),var(--accent-d)); color:#0a0a0a; flex:1 1 160px;}
+  .btn-ghost{background:var(--panel2); color:var(--txt); border:1px solid var(--line); flex:1 1 120px;}
+  .btn-danger{background:#3a1418; color:#ff9a9a; border:1px solid #5a2228; flex:1 1 120px;}
+  textarea{
+    width:100%; min-height:220px; background:#0e1012; color:#9be89b; font:12px/1.5 'Consolas',monospace;
+    border:1px solid var(--line); border-radius:10px; padding:10px; -webkit-user-select:text; user-select:text;
+  }
+  .out-head{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;}
+  .out-head h2{font-size:14px; margin:0;}
+  .hint{font-size:12px; color:var(--sub); margin-top:8px; line-height:1.5;}
+  .toast{
+    position:fixed; left:50%; bottom:22px; transform:translate(-50%,12px); background:var(--accent); color:#0a0a0a;
+    font-weight:800; font-size:13px; padding:10px 18px; border-radius:24px; opacity:0; pointer-events:none;
+    transition:opacity .18s ease, transform .18s ease; z-index:9;
+  }
+  .toast.show{opacity:1; transform:translate(-50%,0);}
+  code{background:var(--panel2); padding:1px 6px; border-radius:5px; font-size:12.5px;}
+</style>
+</head>
+<body>
+  <h1>🎛️ Editor segmentů — Punk Runner</h1>
+  <p class="sub">Poskládej jeden úsek trati (segment) přesně podle sebe, exportuj ho jako <code>.js</code> soubor
+    a ulož do složky <code>segments/</code> vedle hry. Hra si nové soubory sama najde a zamíchá je náhodně
+    za sebe — nic v samotné hře se přitom nemění.</p>
+
+  <div class="panel">
+    <div class="row">
+      <div class="field">
+        <label>Číslo segmentu</label>
+        <input type="number" id="segId" min="1" max="9999" value="1">
+      </div>
+      <div class="field" style="flex:2 1 200px">
+        <label>Název (jen pro tebe, do hry se nepromítá)</label>
+        <input type="text" id="segName" placeholder="např. Dvě auta vedle sebe">
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="field">
+        <label>Délka segmentu</label>
+        <input type="number" id="segLen" min="8" step="1" value="24">
+      </div>
+      <div class="field">
+        <label>Krok mřížky</label>
+        <input type="number" id="segStep" min="1" step="1" value="4">
+      </div>
+    </div>
+    <div class="legend">
+      <div class="chip"><span class="dot" style="background:var(--coin)"></span>mince</div>
+      <div class="chip"><span class="dot" style="background:var(--bottle)"></span>lahev</div>
+      <div class="chip"><span class="dot" style="background:var(--puddle)"></span>louže</div>
+      <div class="chip"><span class="dot" style="background:var(--car)"></span>auto</div>
+      <div class="chip"><span class="dot" style="background:var(--carf)"></span>auto otočené</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="lanehead"><div>vzdál.</div><div>levý pruh</div><div>střed</div><div>pravý pruh</div></div>
+    <div class="grid" id="grid"></div>
+    <p class="hint">Klepnutím na políčko procházíš typy: prázdné → mince → lahev → louže → auto → auto otočené → zpět prázdné.
+      Řádek nahoře = první věc, na kterou hráč v segmentu narazí.</p>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn-main" id="btnExport">⬇️ Exportovat segment_XXXX.js</button>
+    <button class="btn-ghost" id="btnCopy">Kopírovat kód</button>
+    <button class="btn-danger" id="btnClear">Vymazat mřížku</button>
+  </div>
+
+  <div class="panel" style="margin-top:14px">
+    <div class="out-head"><h2>Náhled vygenerovaného souboru</h2></div>
+    <textarea id="out" readonly spellcheck="false"></textarea>
+    <p class="hint">
+      1) Klepni na <b>Exportovat</b> — stáhne se soubor pojmenovaný podle čísla segmentu (např. <code>segment_0003.js</code>).<br>
+      2) Přendej ho do složky <code>segments/</code>, která leží vedle HTML souboru hry.<br>
+      3) Hotovo — hra ho při dalším spuštění sama najde a zamíchá mezi ostatní segmenty. Nic jiného upravovat nemusíš,
+      ani při přidávání dalších nových segmentů (jen jim dej další volné číslo).
+    </p>
+  </div>
+
+  <div class="toast" id="toast">Uloženo</div>
+
+<script>
+(function(){
+  const TYPES = ['empty','coin','bottle','puddle','car','car_flipped'];
+  const grid = document.getElementById('grid');
+  const segId = document.getElementById('segId');
+  const segName = document.getElementById('segName');
+  const segLen = document.getElementById('segLen');
+  const segStep = document.getElementById('segStep');
+  const out = document.getElementById('out');
+  const toast = document.getElementById('toast');
+
+  // cells[row][lane] = type string
+  let cells = [];
+
+  function rowCount(){
+    return Math.max(1, Math.floor(Number(segLen.value)/Number(segStep.value)) + 1);
+  }
+
+  function ensureCellsSize(){
+    const rows = rowCount();
+    while(cells.length < rows) cells.push(['empty','empty','empty']);
+    cells.length = rows;
+  }
+
+  function labelFor(type){
+    switch(type){
+      case 'coin': return 'MINCE';
+      case 'bottle': return 'LAHEV';
+      case 'puddle': return 'LOUŽE';
+      case 'car': return 'AUTO';
+      case 'car_flipped': return 'AUTO';
+      default: return '';
+    }
+  }
+
+  function renderGrid(){
+    ensureCellsSize();
+    const rows = rowCount();
+    grid.innerHTML = '';
+    for(let r=0; r<rows; r++){
+      const z = Math.min(r*Number(segStep.value), Number(segLen.value));
+      const rowEl = document.createElement('div');
+      rowEl.className = 'gridrow';
+      const zEl = document.createElement('div');
+      zEl.className = 'zlabel';
+      zEl.textContent = z;
+      rowEl.appendChild(zEl);
+      for(let lane=0; lane<3; lane++){
+        const type = cells[r][lane];
+        const cellEl = document.createElement('div');
+        cellEl.className = 'cell t-' + type;
+        cellEl.textContent = labelFor(type);
+        if(type==='car_flipped'){
+          const badge = document.createElement('span');
+          badge.className = 'flip-badge'; badge.textContent = '↺';
+          cellEl.appendChild(badge);
+        }
+        cellEl.addEventListener('click', ()=>{
+          const idx = TYPES.indexOf(cells[r][lane]);
+          cells[r][lane] = TYPES[(idx+1) % TYPES.length];
+          renderGrid();
+          updateOutput();
+        });
+        rowEl.appendChild(cellEl);
+      }
+      grid.appendChild(rowEl);
+    }
+  }
+
+  function pad4(n){ return String(Math.max(1, Math.min(9999, Math.round(n||1)))).padStart(4,'0'); }
+
+  function jsEscape(str){ return String(str||'').replace(/\\\\/g,'\\\\\\\\').replace(/"/g,'\\\\"'); }
+
+  function buildItems(){
+    const items = [];
+    const rows = rowCount();
+    for(let r=0; r<rows; r++){
+      const z = Math.min(r*Number(segStep.value), Number(segLen.value));
+      for(let lane=0; lane<3; lane++){
+        const type = cells[r][lane];
+        if(type==='empty') continue;
+        if(type==='car_flipped'){
+          items.push({type:'car', lane, z, flipped:true});
+        } else {
+          items.push({type, lane, z});
+        }
+      }
+    }
+    return items;
+  }
+
+  function buildFileText(){
+    const id = pad4(segId.value);
+    const name = segName.value.trim();
+    const length = Math.max(8, Math.round(Number(segLen.value)||24));
+    const items = buildItems();
+    const itemLines = items.map(it=>{
+      const parts = [`type:"${it.type}"`, `lane:${it.lane}`, `z:${it.z}`];
+      if(it.flipped) parts.push('flipped:true');
+      return '      { ' + parts.join(', ') + ' },';
+    }).join('\\n');
+    return `// segment_${id}.js${name ? ' — ' + jsEscape(name) : ''}
+// Vygenerováno editorem segmentů Punk Runner. Stačí tenhle soubor uložit
+// do složky segments/ vedle hry - nic dalšího upravovat netřeba.
+(function(){
+  if(!window.PunkRunner || typeof window.PunkRunner.registerSegment !== 'function'){
+    console.warn('PunkRunner registr nenalezen - segment_${id}.js se nenačetl.');
+    return;
+  }
+  window.PunkRunner.registerSegment({
+    id: "${id}",
+    name: "${jsEscape(name)}",
+    length: ${length},
+    items: [
+${itemLines || '      // (segment je zatím prázdný)'}
+    ]
+  });
+})();
+`;
+  }
+
+  function updateOutput(){
+    out.value = buildFileText();
+  }
+
+  function showToast(msg){
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(()=>toast.classList.remove('show'), 1600);
+  }
+
+  document.getElementById('btnExport').addEventListener('click', ()=>{
+    updateOutput();
+    const id = pad4(segId.value);
+    const blob = new Blob([out.value], {type:'text/javascript'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'segment_' + id + '.js';
+    document.body.appendChild(a); a.click(); a.remove();
+    // Po exportu rovnou navrhni další volné číslo pro příští segment.
+    localStorage.setItem('pr_seg_next_id', String(Number(segId.value)+1));
+    showToast('Staženo: segment_' + id + '.js');
+  });
+
+  document.getElementById('btnCopy').addEventListener('click', async ()=>{
+    updateOutput();
+    try{ await navigator.clipboard.writeText(out.value); showToast('Kód zkopírován'); }
+    catch(e){ out.select(); document.execCommand('copy'); showToast('Kód zkopírován'); }
+  });
+
+  document.getElementById('btnClear').addEventListener('click', ()=>{
+    cells = cells.map(()=>['empty','empty','empty']);
+    renderGrid();
+    updateOutput();
+  });
+
+  [segLen, segStep].forEach(el=>el.addEventListener('input', ()=>{ renderGrid(); updateOutput(); }));
+  [segId, segName].forEach(el=>el.addEventListener('input', updateOutput));
+
+  const savedNext = localStorage.getItem('pr_seg_next_id');
+  if(savedNext) segId.value = savedNext;
+
+  renderGrid();
+  updateOutput();
+})();
+</script>
+</body>
+</html>
