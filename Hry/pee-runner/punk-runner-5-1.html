@@ -1,0 +1,1974 @@
+
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Punk Runner 3D - Ultimate Edition</title>
+<style>
+  :root{ box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); }
+  html,body{ height:100%; margin:0; overflow:hidden; background:#000; font-family:'Segoe UI',Arial,sans-serif; touch-action:none; -webkit-user-select:none; user-select:none; }
+  #wrap{position:relative; width:100%; height:100%;}
+  canvas{display:block; width:100%; height:100%;}
+  #hud{ position:absolute; top:calc(14px + env(safe-area-inset-top,0px)); left:0; right:0; display:flex; justify-content:space-between; padding:0 18px; color:#fff; font-weight:700; font-size:20px; text-shadow:0 2px 4px rgba(0,0,0,.6); pointer-events:none; }
+  #overlay{ position:absolute; inset:0; background:none; color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; text-align:center; padding:20px; padding-top:calc(30px + env(safe-area-inset-top,0px)); gap:14px; }
+  #overlay p{margin:0; font-size:15px; opacity:.9; max-width:320px; line-height:1.4; text-shadow:0 2px 6px rgba(0,0,0,.85);}
+  #startBtn{ margin-top:0; padding:14px 34px; font-size:18px; font-weight:800; border:none; border-radius:30px; background:linear-gradient(135deg,#39ff6a,#1fbf50); color:#0a0a0a; cursor:pointer; box-shadow:0 6px 0 #0d7a2c; }
+  #startBtn:active{transform:translateY(4px); box-shadow:0 2px 0 #0d7a2c;}
+  .hidden{display:none !important;}
+  #hitFlash{ position:absolute; top:38%; left:50%; transform:translate(-50%,-50%) scale(0.6); font-size:56px; font-weight:900; font-style:italic; color:#fff45c; -webkit-text-stroke:3px #d0161f; text-stroke:3px #d0161f; text-shadow:3px 3px 0 #7a0000, -2px -2px 0 #7a0000; opacity:0; transition:opacity .18s ease, transform .18s ease; pointer-events:none; z-index:5; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <div>SKORE: <span id="score">0</span></div>
+    <div>MINCE <span id="coins">0</span></div>
+    <div>LAHVAC <span id="bottles">0</span></div>
+    <div>BEST: <span id="best">0</span></div>
+  </div>
+  <div id="overlay">
+    <p id="msg"></p>
+    <button id="startBtn">HRAT</button>
+  </div>
+  <div id="hitFlash">PRÁSK!</div>
+  <div id="segDebug" style="position:absolute; left:10px; bottom:calc(8px + env(safe-area-inset-bottom,0px)); color:rgba(255,255,255,.65); font:11px/1.4 monospace; text-shadow:0 1px 2px #000; pointer-events:none; z-index:6;"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const SUPABASE_URL = "https://roxjuzctepcgqwtvbfxi.supabase.co";
+const SUPABASE_KEY = "sb_publishable_2tx7xGmhpxD-X9UZ2l39aA_eCaPeWx5";
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// --- SEGMENTOVY SYSTEM: veřejný registr, do kterého se externí soubory
+// segments/segment_XXXX.js samy zapíší zavoláním PunkRunner.registerSegment().
+// Musí být MIMO hlavní IIFE, protože segmentové soubory se načítají jako
+// samostatné <script> tagy v globálním scope.
+window.PunkRunner = window.PunkRunner || { segments: [] };
+window.PunkRunner.registerSegment = function(seg){
+  if(seg && Array.isArray(seg.items) && seg.items.length){
+    window.PunkRunner.segments.push(seg);
+  }
+};
+
+(function(){
+  const canvas = document.getElementById('c');
+  const overlay = document.getElementById('overlay');
+  const msg = document.getElementById('msg');
+  const startBtn = document.getElementById('startBtn');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const coinsEl = document.getElementById('coins');
+  const bottlesEl = document.getElementById('bottles');
+
+  let W,H;
+  let scene, camera, renderer;
+  const laneX = [-2.3, 0, 2.3];
+
+  // --- VESTAVĚNÉ SEGMENTY (záložní sada) ---------------------------------
+  // Používají se vždy, dokud se nenačte alespoň jeden externí segment ze
+  // složky segments/ (viz loadExternalSegments níže). Díky tomu je hra
+  // hratelná i úplně bez editoru/externích souborů.
+  // Formát segmentu: { id, length, items:[{type, lane, z, flipped?}] }
+  //   - type:  'coin' | 'bottle' | 'puddle' | 'car'
+  //   - lane:  0 (levý) | 1 (střed) | 2 (pravý)
+  //   - z:     vzdálenost od ZAČÁTKU segmentu (0 = první věc, na kterou
+  //            hráč v segmentu narazí; length = poslední)
+  //   - flipped: u 'car' volitelně otočí auto o 180°
+  const DEFAULT_SEGMENTS = [
+    { id:'default-1', length:20, items:[
+      {type:'coin', lane:1, z:2}, {type:'coin', lane:1, z:5},
+      {type:'coin', lane:1, z:8}, {type:'coin', lane:1, z:11},
+    ]},
+    { id:'default-2', length:24, items:[
+      {type:'car', lane:1, z:10},
+      {type:'coin', lane:0, z:10}, {type:'coin', lane:2, z:10},
+    ]},
+    { id:'default-3', length:28, items:[
+      {type:'puddle', lane:0, z:4}, {type:'puddle', lane:2, z:12}, {type:'puddle', lane:1, z:20},
+    ]},
+    { id:'default-4', length:30, items:[
+      {type:'car', lane:0, z:8}, {type:'car', lane:2, z:8},
+      {type:'coin', lane:1, z:8}, {type:'coin', lane:1, z:14},
+    ]},
+    { id:'default-5', length:22, items:[
+      {type:'bottle', lane:0, z:6}, {type:'bottle', lane:1, z:6}, {type:'bottle', lane:2, z:6},
+      {type:'puddle', lane:1, z:16},
+    ]},
+    { id:'default-6', length:26, items:[
+      {type:'puddle', lane:2, z:4}, {type:'car', lane:0, z:12},
+      {type:'coin', lane:1, z:12}, {type:'coin', lane:1, z:16},
+      {type:'car', lane:2, z:20, flipped:true},
+    ]},
+  ];
+
+  // Zkusí donačíst externí segmenty ze složky segments/ (segment_0001.js,
+  // segment_0002.js, ...). Žádný soubor tam chybět nemusí vadit - chybějící
+  // čísla se přeskočí (onerror). Nepotřebuje manifest ani úpravu téhle hry:
+  // nový segment stačí přidat jako další soubor s dalším číslem.
+  function loadExternalSegments(){
+    const FOLDER = 'segments/', MAX = 60;
+    const dbg = document.getElementById('segDebug');
+    let settled = 0, loaded = 0;
+    function report(){
+      if(!dbg) return;
+      const ext = window.PunkRunner.segments.length;
+      dbg.textContent = ext>0
+        ? 'segmenty: ' + ext + ' externích načteno ze segments/'
+        : 'segmenty: 0 externích (segments/ nenalezena nebo prázdná) - hraju s ' + DEFAULT_SEGMENTS.length + ' vestavěnými';
+    }
+    if(dbg) dbg.textContent = 'segmenty: načítám ze segments/ ...';
+    for(let i=1;i<=MAX;i++){
+      const num = String(i).padStart(4,'0');
+      const s = document.createElement('script');
+      s.src = FOLDER + 'segment_' + num + '.js';
+      s.async = true;
+      s.onload = function(){ loaded++; settled++; if(settled>=MAX) report(); };
+      s.onerror = function(){ settled++; if(settled>=MAX) report(); };
+      document.head.appendChild(s);
+    }
+    // Jistota i kdyby některý požadavek "settled" nikdy nenahlásil.
+    setTimeout(report, 2000);
+  }
+
+  function segmentPool(){
+    return (window.PunkRunner.segments && window.PunkRunner.segments.length)
+      ? window.PunkRunner.segments : DEFAULT_SEGMENTS;
+  }
+
+  function pickSegment(){
+    const pool = segmentPool();
+    if(pool.length===1) return pool[0];
+    let seg;
+    do{ seg = pool[Math.floor(Math.random()*pool.length)]; } while(seg.id===lastSegmentId);
+    lastSegmentId = seg.id;
+    return seg;
+  }
+
+  // Vytvoří konkrétní 3D objekt jedné položky segmentu a zařadí ho do
+  // stejných polí (obstacles/coins/bottles), která používá zbytek hry -
+  // kolize a sbírání pak fungují úplně beze změny.
+  function spawnItem(type, lane, worldZ, flipped){
+    const x = laneX[lane];
+    if(type==='puddle'){
+      const mesh = createPuddle(); mesh.position.set(x, 0, worldZ);
+      scene.add(mesh); obstacles.push({mesh, lane, jumpReq:0.15, zHalf:0.55, isPuddle:true});
+    } else if(type==='car'){
+      const mesh = getPoliceCar(); if(flipped) mesh.rotation.y += Math.PI;
+      mesh.position.set(x, 0, worldZ);
+      scene.add(mesh); obstacles.push({mesh, lane, jumpReq:0.85, zHalf:1.5, isPuddle:false});
+    } else if(type==='coin'){
+      const mesh = createCoin(); mesh.position.set(x, 0.7, worldZ);
+      scene.add(mesh); coins.push({mesh, lane, collected:false});
+    } else if(type==='bottle'){
+      const mesh = createBottle(); mesh.position.set(x, 0, worldZ);
+      scene.add(mesh); bottles.push({mesh, lane, collected:false});
+    }
+  }
+
+  function spawnSegment(seg){
+    (seg.items||[]).forEach(it=>{
+      spawnItem(it.type, it.lane, spawnCursorZ - (it.z||0), !!it.flipped);
+    });
+    spawnCursorZ -= Math.max(6, seg.length||20);
+  }
+
+  // Předsune sklad segmentů dostatečně daleko před hráče, aby nikdy nedošly.
+  const SEGMENT_LOOKAHEAD = 130;
+  function ensureSegmentsAhead(){
+    let guard = 0;
+    while(-spawnCursorZ < SEGMENT_LOOKAHEAD && guard++ < 20){
+      spawnSegment(pickSegment());
+    }
+  }
+
+  
+  // PCR1 CAR MATERIALS AND GLOBALS
+  const std=(c,r,m,o={})=>new THREE.MeshStandardMaterial(Object.assign({color:c,roughness:r,metalness:m},o));
+  const M={
+    white:std(0xd8dde1,.28,.35),
+    dark:std(0x14181d,.5,.15),
+    black:std(0x08090a,.7,0),
+    glass:std(0x0d1822,.08,.35),
+    chrome:std(0xc4cbcf,.18,.9),
+    red:std(0xc0161b,.25,.15,{emissive:0x400000}),
+    lamp:std(0xffffff,.08,.1,{emissive:0x7fbfff,emissiveIntensity:.5}),
+    beaconL:std(0x1260ff,.15,.1,{emissive:0x004cff,emissiveIntensity:2}),
+    beaconR:std(0x1260ff,.15,.1,{emissive:0x004cff,emissiveIntensity:2}),
+    rim:std(0xc9ced2,.3,.7)
+  };
+  const BLUE='#0a4bbd',YEL='#ffd81a',INK='#0a3f9e';
+  const BL='#1668c8',LM='#d6f21c',AX=[-1.46,1.226];
+
+  // RADY3 PLAYER GLOBALS
+  let playerGroup, root, pelvis, torso, headGrp, spikes = [], stripes = [], peeAnchor;
+  let legs = [], arms = [];
+  const L1 = 0.40, L2 = 0.40, ANK = 0.075;
+  let phase = 0, T = 0;
+  let dashes = [];
+  let buildings = [];
+  // --- INTRO (úvodní obrazovka): auto, čůrací proud a stříkanec ---
+  let introCar, peeStream, splashCircle, drips = [], puddle, introActive = true;
+  // Pozice kamery pro intro a pro hru + stav plynulého přechodu mezi nimi.
+  const INTRO_CAM_POS = new THREE.Vector3(-1.3,2.0,2.3);
+  const INTRO_LOOKAT  = new THREE.Vector3(1.3,0.85,-0.3);
+  const GAME_CAM_POS  = new THREE.Vector3(0,3.7,6.2);
+  const GAME_LOOKAT   = new THREE.Vector3(0,1.2,-11);
+  let camBlendActive = false, camBlendT = 0;
+  const CAM_BLEND_DURATION = 1.3;
+
+  // --- POLICISTA v intro scéně: přiběhne ve chvíli, kdy hráč klikne "HRAT" ---
+  let copGroup, copRoot, copPelvis, copTorso, copHeadGrp, copLegs = [], copArms = [], copBaton;
+  let copActive = false, copPhase = 0, copT = 0;
+  const COP_RUN_DURATION = 1.0;
+  const COP_START_POS = new THREE.Vector3(-4.2, 0, 1.9);
+  const COP_END_POS   = new THREE.Vector3(-0.55, 0, 0.85);
+  // Občasné "honění" během běhu - policista se na pár vteřin objeví těsně
+  // za hráčem a pak zase odpadne, v náhodných intervalech.
+  let chaseActive = false, chaseTimer = 0, chaseT = 0;
+  const CHASE_DURATION = 4;
+
+  let best = 0;
+
+  async function nactiBest() {
+    const { data, error } = await db
+        .from("scores")
+        .select("score")
+        .eq("game", "pee-runner")
+        .order("score", { ascending: false })
+        .limit(1);
+
+    if (error) {
+        console.error("Chyba při načítání nejlepšího skóre:", error);
+        return;
+    }
+
+    if (data && data.length > 0) {
+        best = data[0].score;
+        bestEl.textContent = best;
+    }
+  }
+  nactiBest();
+
+  try{ best = parseInt(localStorage.getItem('punkRunnerBest3D')||'0',10) || 0; }catch(e){}
+  bestEl.textContent = best;
+
+  // Na úzkých (mobilních) obrazovkách je vodorovné zorné pole u pevného
+  // vertikálního FOV moc malé a krajní pruhy vypadnou z obrazu. Proto FOV
+  // podle poměru stran dopočítáváme tak, aby byly oba krajní pruhy vždy vidět.
+  const BASE_FOV = 60, LANE_HALF_MAX = 2.3, LANE_MARGIN = 1.0;
+  function fitFov(){
+    if(!camera) return;
+    const dz = Math.max(0.1, GAME_CAM_POS.z);
+    const neededHalfH = Math.atan((LANE_HALF_MAX+LANE_MARGIN)/dz);
+    const vHalf = Math.atan(Math.tan(neededHalfH)/Math.min(camera.aspect,1));
+    const vFovDeg = THREE.MathUtils.radToDeg(vHalf*2);
+    camera.fov = Math.max(BASE_FOV, Math.min(vFovDeg, 92));
+    camera.updateProjectionMatrix();
+  }
+
+  function resize(){
+    W = window.innerWidth; H = window.innerHeight;
+    if(renderer){ renderer.setSize(W,H); camera.aspect = W/H; fitFov(); }
+  }
+
+  // --- PCR1 CAR BUILDER HELPERS ---
+  function box(w,h,d,mat,x=0,y=0,z=0,rx=0,ry=0,rz=0){
+    const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+    o.position.set(x,y,z);o.rotation.set(rx,ry,rz);return o;
+  }
+  function tex(w,h,draw){
+    const c=document.createElement('canvas');c.width=w;c.height=h;
+    draw(c.getContext('2d'));
+    const t=new THREE.CanvasTexture(c);
+    t.encoding=THREE.sRGBEncoding;
+    t.anisotropy=renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w,h,t,lit=true){
+    const Mat=lit?THREE.MeshStandardMaterial:THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w,h),
+      new Mat({map:t,transparent:true,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
+  }
+  function spaced(x,str,cx,cy,sp){
+    const ws=[...str].map(ch=>x.measureText(ch).width);
+    let px=cx-(ws.reduce((a,b)=>a+b,0)+sp*(str.length-1))/2;
+    [...str].forEach((ch,i)=>{x.fillText(ch,px,cy);px+=ws[i]+sp;});
+  }
+  function bodyProfile(){
+    const s=new THREE.Shape();
+    s.moveTo(-2.28,.24);
+    [[-2.33,.42],[-2.31,.70],[-2.20,.80],[-1.05,.93],[1.30,.99],[2.05,1.01],[2.29,.98],[2.33,.62],[2.27,.26]]
+      .forEach(p=>s.lineTo(p[0],p[1]));
+    return s;
+  }
+  function wheel(x,z){
+    const w=new THREE.Group(),s=Math.sign(z);
+    const cyl=(r,h,m)=>{const o=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,32),m);o.rotation.x=Math.PI/2;return o;};
+    w.add(cyl(.33,.21,M.black),cyl(.235,.215,M.rim),cyl(.05,.23,M.chrome));
+    for(let a=0;a<5;a++) w.add(box(.022,.46,.008,M.dark,0,0,s*.109,0,0,a*Math.PI/5+.3));
+    w.position.set(x,.33,z);
+    return w;
+  }
+
+  function createPoliceCarTemplate(){
+    const g=new THREE.Group(),add=(...o)=>o.forEach(m=>g.add(m));
+
+    const bg=new THREE.ExtrudeGeometry(bodyProfile(),{depth:1.75,bevelEnabled:true,bevelSegments:3,steps:1,bevelSize:.045,bevelThickness:.035});
+    bg.translate(0,0,-.875);
+    add(new THREE.Mesh(bg,M.white));
+    add(box(4.4,.2,1.5,M.black,-.05,.17,0),box(1.8,.08,1.84,M.black,-.1,.30,0));
+
+    const gs=new THREE.Shape();
+    gs.moveTo(-.95,.93);gs.lineTo(-.10,1.42);gs.lineTo(.95,1.45);gs.lineTo(1.65,1.02);
+    const gg=new THREE.ExtrudeGeometry(gs,{depth:1.56,bevelEnabled:false});
+    gg.translate(0,0,-.78);
+    add(new THREE.Mesh(gg,M.glass),box(1.10,.05,1.58,M.white,.42,1.44,0));
+    for(const z of [-.79,.79]){
+      add(box(.06,.98,.07,M.black,-.525,1.18,z,0,0,-1.06),   
+          box(.08,.50,.07,M.black,.12,1.18,z),                
+          box(.16,.82,.07,M.white,1.30,1.235,z,0,0,1.02));    
+    }
+    for(const z of [-1.0,1.0]) add(box(.13,.09,.17,M.white,-.78,.99,z),box(.05,.04,.09,M.black,-.80,.96,z*.93));
+
+    const PX=400;
+    const mk=flip=>tex(1720,312,x=>{
+      const X=v=>(flip?2.15-v:v+2.15)*PX,Y=v=>(1.02-v)*PX;
+      const poly=(c,p)=>{x.fillStyle=c;x.beginPath();p.forEach((q,i)=>x[i?'lineTo':'moveTo'](X(q[0]),Y(q[1])));x.closePath();x.fill();};
+      x.fillStyle='#06080a';
+      AX.forEach(a=>{x.beginPath();x.arc(X(a),Y(.33),.41*PX,0,7);x.fill();});
+      poly(BL,[[-.98,.925],[2.10,.925],[2.10,.805],[-.98,.805]]);
+      [-1.55,-1.44,-1.33,-1.22,-1.11].forEach((v,i)=>poly(i%2?BL:LM,[[v,.85],[v+.10,.85],[v+.10,.76],[v,.76]]));
+      const stripe=(b,c)=>poly(c,[[b,.26],[b+.07,.26],[b+.27,.80],[b+.20,.80]]);
+      [[-1.02,BL],[-.95,LM],[-.88,BL],[.45,BL],[.52,LM],[.59,BL]].forEach(s=>stripe(s[0],s[1]));
+      x.strokeStyle='rgba(0,0,0,.4)';x.lineWidth=3;
+      [-.85,.12,1.02].forEach(v=>{x.beginPath();x.moveTo(X(v),Y(.80));x.lineTo(X(v),Y(.30));x.stroke();});
+      x.fillStyle='#aab0b5';
+      [-.12,.86].forEach(v=>x.fillRect(X(flip?v+.14:v),Y(.775),.14*PX,.035*PX));
+      x.textBaseline='middle';x.textAlign='left';
+      x.fillStyle='#fff';x.font='bold 28px Arial';spaced(x,'POMÁHAT A CHRÁNIT',X(-.38),Y(.865),2);
+      x.font='bold 36px Arial';x.fillText('158',X(1.93)-(flip?0:0)-30,Y(.865));
+      x.strokeStyle='#fff';x.lineWidth=4;x.beginPath();x.arc(X(1.78),Y(.865),17,0,7);x.stroke();
+      x.fillStyle='#111';x.font='bold 52px Arial';spaced(x,'POLICIE',X(-.30),Y(.56),6);
+    });
+    const sR=decal(4.3,.78,mk(false));sR.position.set(0,.63,.9115);
+    const sL=decal(4.3,.78,mk(true));sL.position.set(0,.63,-.9115);sL.rotation.y=Math.PI;
+    add(sR,sL);
+
+    add(box(.06,.10,1.30,M.black,-2.35,.36,0));
+    add(box(.05,.24,.64,M.black,-2.36,.60,0));
+    for(let i=-3;i<=3;i++) add(box(.055,.20,.015,M.chrome,-2.375,.60,i*.085));
+    add(box(.05,.03,.70,M.chrome,-2.35,.72,0));
+    for(const z of [-.66,.66]){
+      const ry=z>0?-.30:.30;
+      add(box(.06,.11,.50,M.lamp,-2.285,.75,z,0,ry,0));
+      add(box(.03,.025,.30,z<0?M.beaconL:M.beaconR,-2.318,.70,z,0,ry,0));
+      add(box(.04,.06,.18,M.lamp,-2.385,.36,z*.93));
+    }
+    const pt=tex(256,56,x=>{
+      x.fillStyle='#f3f3ee';x.fillRect(0,0,256,56);
+      x.fillStyle='#1747a8';x.fillRect(0,0,26,56);
+      x.fillStyle='#fff';x.font='bold 14px Arial';x.textAlign='center';x.fillText('CZ',13,50);
+      x.fillStyle='#111';x.font='bold 40px Arial';x.textBaseline='middle';x.fillText('1A1 0158',148,30);
+    });
+    const pF=decal(.52,.114,pt,false);pF.position.set(-2.39,.40,0);pF.rotation.y=-Math.PI/2;
+    const pB=decal(.52,.114,pt,false);pB.position.set(2.375,.42,0);pB.rotation.y=Math.PI/2;
+    add(pF,pB);
+
+    for(const z of [-.62,.62]) add(box(.05,.12,.42,M.red,2.365,.88,z));
+    add(box(.04,.26,1.66,M.dark,2.35,.40,0));
+    const rt=tex(350,110,x=>{
+      x.font='bold 52px Arial';x.textBaseline='middle';x.textAlign='left';x.fillStyle='#111';
+      spaced(x,'POLICIE',175,55,5);
+    });
+    const rd=decal(.70,.22,rt);rd.position.set(2.37,.72,0);rd.rotation.y=Math.PI/2;add(rd);
+
+    const ht=tex(512,256,x=>{
+      x.strokeStyle='#5a6066';x.lineWidth=5;x.beginPath();x.arc(256,66,40,0,7);x.stroke();
+      x.lineWidth=3;
+      for(let a=0;a<8;a++){x.beginPath();x.moveTo(256,66);x.lineTo(256+34*Math.cos(a*Math.PI/4),66+34*Math.sin(a*Math.PI/4));x.stroke();}
+      x.font='bold 84px Arial';x.textBaseline='middle';x.textAlign='left';x.fillStyle='#2a2e33';
+      spaced(x,'POLICIE',256,190,8);
+    });
+    const hood=new THREE.Group();
+    const hm=decal(.95,.475,ht);hm.rotation.x=-Math.PI/2;hm.rotation.z=-Math.PI/2;
+    hood.add(hm);hood.position.set(-1.62,.915,0);hood.rotation.z=.113;add(hood);
+
+    AX.forEach(x=>[-.85,.85].forEach(z=>add(wheel(x,z))));
+
+    const bar=new THREE.Group();
+    bar.add(box(.30,.06,1.22,M.rim),
+      box(.26,.09,.44,M.beaconL,0,.075,-.36),
+      box(.26,.09,.44,M.beaconR,0,.075,.36),
+      box(.26,.08,.28,M.lamp,0,.07,0));
+    bar.position.set(.30,1.495,0);
+    add(bar);
+
+    add(box(.02,.34,.02,M.black,.85,1.635,-.5,0,0,-.10));
+
+    g.position.y=.02;
+    // Úprava velikosti a natočení vozu pro hru (jede v ose Z)
+    g.scale.set(0.90, 0.90, 0.90); 
+    g.rotation.y = Math.PI / 2; // otočí předek do osy Z
+    return g;
+  }
+
+  let cachedPoliceCar;
+  function getPoliceCar(){
+    if(!cachedPoliceCar) cachedPoliceCar = createPoliceCarTemplate();
+    return cachedPoliceCar.clone();
+  }
+
+  // --- RADY3 PLAYER BUILDER HELPERS ---
+  const wrap = x => Math.atan2(Math.sin(x), Math.cos(x));
+  const bump = (x, c, w) => Math.exp(-Math.pow(wrap(x - c) / w, 2));
+
+  function legPose(p) {
+    const f = 0.15 + 0.45 * Math.sin(p);
+    const k = 0.3 + 0.3 * bump(p, Math.PI - 0.2, 0.7) + 1.25 * bump(p, -0.35, 0.95);
+    const w = 0.6 * bump(p, -1.0, 1.0) - 0.15 * bump(p, 1.4, 0.5);
+    return { f, k, a: w + f - k, w };
+  }
+  function footInfo(p) {
+    const { f, k, w } = legPose(p), s = f - k;
+    const ky = -L1 * Math.cos(f), kz = L1 * Math.sin(f);
+    const ay = ky - L2 * Math.cos(s), az = kz + L2 * Math.sin(s);
+    const fy = -Math.sin(w), fz = Math.cos(w), dy = -Math.cos(w), dz = -Math.sin(w);
+    const heel = ay - 0.09 * fy + ANK * dy, toe = ay + 0.2 * fy + ANK * dy;
+    return { low: Math.min(heel, toe), z: az };
+  }
+
+  function drawStar(cx, x, y, rOut, rIn, color){
+    cx.beginPath();
+    for(let i=0;i<10;i++){
+      const r = i%2===0 ? rOut : rIn, a = -Math.PI/2 + i*Math.PI/5;
+      const px = x+r*Math.cos(a), py = y+r*Math.sin(a);
+      i===0 ? cx.moveTo(px,py) : cx.lineTo(px,py);
+    }
+    cx.closePath(); cx.fillStyle = color; cx.fill();
+  }
+  function drawSignText(cx, str, cx0, cy0, size, color){
+    // Ručně-psaný dojem: každé písmeno má vlastní mírné natočení a posun nahoru/dolů.
+    cx.font = `italic 900 ${size}px Arial`; cx.textAlign='left'; cx.textBaseline='alphabetic';
+    const chars = [...str], widths = chars.map(ch=>cx.measureText(ch).width);
+    const total = widths.reduce((a,b)=>a+b,0);
+    let x = cx0 - total/2;
+    chars.forEach((ch,i)=>{
+      const w = widths[i], yOff = Math.sin(i*1.3)*size*0.09, rot = Math.sin(i*0.9)*0.07;
+      cx.save(); cx.translate(x+w/2, cy0+yOff); cx.rotate(rot);
+      cx.lineWidth = size*0.08; cx.strokeStyle='#000'; cx.strokeText(ch,-w/2,0); cx.fillStyle=color; cx.fillText(ch,-w/2,0);
+      cx.restore(); x += w;
+    });
+  }
+  function backPatchTexture(){
+    // Nášivka na záda bundy: kruh hvězd, přeškrtnuté "EU" a nápis - bez modrého
+    // pozadí, jen na průhledném plátně (aby prosvítala barva bundy). Rozložení
+    // odpovídá referenčnímu obrázku: EU nahoře, oba řádky nápisu rovnoměrně
+    // rozprostřené uvnitř kruhu hvězd, ne namačkané dole.
+    const c = document.createElement('canvas'); c.width=512; c.height=512;
+    const cx = c.getContext('2d'), CX=256, CY=210, R=172;
+    for(let i=0;i<12;i++){
+      const a = -Math.PI/2 + i*(Math.PI*2/12);
+      drawStar(cx, CX+R*Math.cos(a), CY+R*Math.sin(a), 25, 10, '#ffd83d');
+    }
+    cx.font='bold 56px Arial'; cx.textAlign='center'; cx.textBaseline='middle'; cx.fillStyle='#ffd83d';
+    const euY = CY-R*0.46;
+    cx.fillText('EU', CX, euY);
+    cx.strokeStyle='#e21b1b'; cx.lineWidth=11; cx.lineCap='round';
+    cx.beginPath(); cx.moveTo(CX-52,euY-28); cx.lineTo(CX+52,euY+28); cx.stroke();
+    drawSignText(cx, 'SOUKROMEY', CX, CY+R*0.08, 58, '#ffd83d');
+    drawSignText(cx, 'POZEMEK', CX, CY+R*0.44, 58, '#ffd83d');
+    return new THREE.CanvasTexture(c);
+  }
+
+  function checkerTexture() {
+    const c = document.createElement('canvas'); c.width = 8; c.height = 8;
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#111'; cx.fillRect(0, 0, 8, 8);
+    cx.fillStyle = '#d81f2a'; cx.fillRect(0, 0, 4, 4); cx.fillRect(4, 4, 4, 4);
+    const t = new THREE.CanvasTexture(c);
+    t.magFilter = THREE.NearestFilter; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 2);
+    return t;
+  }
+  function tube(r0, r1, len, mat, seg = 14) {
+    const g = new THREE.CylinderGeometry(r0, r1, len, seg); g.translate(0, -len / 2, 0);
+    return new THREE.Mesh(g, mat);
+  }
+  function ball(r, mat, x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), mat);
+    m.position.set(x, y, z); m.scale.set(sx, sy, sz); return m;
+  }
+
+  function buildPlayer() {
+    playerGroup = new THREE.Group();
+    root = new THREE.Group();
+    // Originální character byl menší, zvětšíme ho aby odpovídal původní hře
+    root.scale.set(0.6, 0.6, 0.6);
+    playerGroup.add(root);
+    
+    // Otočení postavy zády ke kameře
+    root.rotation.y = Math.PI;
+
+    spikes = []; legs = []; arms = [];
+
+    const pants = new THREE.MeshLambertMaterial({ map: checkerTexture() });
+    const skin = new THREE.MeshLambertMaterial({ color: 0xe8b998 });
+    const jacket = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.35, metalness: 0.2, side: THREE.DoubleSide });
+    const tee = new THREE.MeshLambertMaterial({ color: 0x0e0e0e, side: THREE.DoubleSide });
+    const beard = new THREE.MeshLambertMaterial({ color: 0x6b4a2b });
+    const boot = new THREE.MeshLambertMaterial({ color: 0x0a0a0a });
+    const sole = new THREE.MeshLambertMaterial({ color: 0x050505 });
+    const metal = new THREE.MeshStandardMaterial({ color: 0xc8ccd4, roughness: 0.3, metalness: 0.9 });
+    const green = new THREE.MeshLambertMaterial({ color: 0x39ff6a });
+    const dark = new THREE.MeshBasicMaterial({ color: 0x0b0b0b });
+
+    pelvis = new THREE.Group(); root.add(pelvis);
+    pelvis.add(ball(0.2, pants, 0, 0.02, 0, 1.05, 0.75, 0.85));
+    peeAnchor = new THREE.Object3D(); peeAnchor.position.set(0.03, -0.03, 0.17); pelvis.add(peeAnchor);
+
+    [-1, 1].forEach(side => {
+      const hip = new THREE.Group(); hip.position.set(side * 0.1, 0, 0);
+      hip.add(ball(0.125, pants));
+      hip.add(tube(0.125, 0.088, L1, pants));
+      const knee = new THREE.Group(); knee.position.y = -L1; hip.add(knee);
+      knee.add(ball(0.088, pants));
+      const calf = tube(0.088, 0.066, L2, pants); knee.add(calf);
+      const shaft = tube(0.078, 0.078, 0.14, boot); shaft.position.y = -L2 + 0.13; knee.add(shaft);
+      const ankle = new THREE.Group(); ankle.position.y = -L2; knee.add(ankle);
+      const upper = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.09, 0.26), boot); upper.position.set(0, -0.03, 0.06); ankle.add(upper);
+      ankle.add(ball(0.07, boot, 0, -0.03, 0.19, 1, 0.75, 1.1));
+      const sl = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.035, 0.31), sole); sl.position.set(0, -0.06, 0.07); ankle.add(sl);
+      pelvis.add(hip);
+      legs.push({ hip, knee, ankle, side });
+    });
+
+    torso = new THREE.Group(); torso.position.y = 0.06; pelvis.add(torso);
+    const prof = [[0.001,0],[0.2,0],[0.235,0.1],[0.25,0.22],[0.29,0.38],[0.31,0.48],[0.26,0.57],[0.13,0.62],[0.001,0.63]]
+      .map(p => new THREE.Vector2(p[0], p[1]));
+    const body = new THREE.Mesh(new THREE.LatheGeometry(prof, 20, 0.5, Math.PI * 2 - 1.0), jacket);
+    body.scale.set(1, 1, 0.68); torso.add(body);
+    const inner = new THREE.Mesh(new THREE.LatheGeometry(prof.map(p => new THREE.Vector2(p.x * 0.96, p.y)), 20), tee);
+    inner.scale.set(1, 1, 0.68); torso.add(inner);
+
+    const backPatch = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.42),
+      new THREE.MeshBasicMaterial({ map: backPatchTexture(), transparent: true, side: THREE.DoubleSide, depthWrite: false, polygonOffset:true, polygonOffsetFactor:-4, polygonOffsetUnits:-4 }));
+    backPatch.position.set(0, 0.34, -0.205); backPatch.rotation.y = Math.PI; torso.add(backPatch);
+    
+    [-1, 1].forEach(sd => {
+      const lap = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.02), jacket);
+      lap.position.set(sd * 0.155, 0.47, 0.17); lap.rotation.set(-0.1, -sd * 0.35, sd * 0.3); torso.add(lap);
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+        const x = sd * (0.16 + i * 0.05), y = 0.3 + j * 0.05;
+        const z = 0.68 * Math.sqrt(Math.max(0.0001, 0.3 * 0.3 - x * x)) + 0.004;
+        const st = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.025, 4), metal);
+        st.position.set(x, y, z); st.rotation.set(Math.PI / 2, 0, Math.PI / 4); torso.add(st);
+      }
+    });
+    const zip = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.3, 0.012), metal); zip.position.set(0.17, 0.2, 0.2); zip.rotation.z = -0.25; torso.add(zip);
+    const neck = tube(0.075, 0.085, 0.2, skin, 12); neck.position.y = 0.72; torso.add(neck);
+    const choker = new THREE.Mesh(new THREE.TorusGeometry(0.088, 0.02, 8, 20), jacket); choker.rotation.x = Math.PI / 2; choker.position.y = 0.65; torso.add(choker);
+    for (let i = 0; i < 12; i++) {
+      const an = i / 12 * Math.PI * 2, sp = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.04, 5), metal);
+      sp.position.set(Math.sin(an) * 0.105, 0.65, Math.cos(an) * 0.105); sp.rotation.set(Math.cos(an) * Math.PI / 2, 0, -Math.sin(an) * Math.PI / 2); torso.add(sp);
+    }
+
+    [-1, 1].forEach(side => {
+      const sh = new THREE.Group(); sh.position.set(side * 0.32, 0.5, 0); torso.add(sh);
+      sh.add(ball(0.095, jacket));
+      sh.add(tube(0.088, 0.066, 0.29, jacket));
+      const sp = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.11, 8), metal);
+      sp.position.set(side * 0.05, 0.1, 0); sp.rotation.z = -side * 0.8; sh.add(sp);
+      const el = new THREE.Group(); el.position.y = -0.29; sh.add(el);
+      el.add(ball(0.066, jacket));
+      el.add(tube(0.066, 0.052, 0.25, jacket, 10));
+      const band = tube(0.058, 0.058, 0.035, dark, 10); band.position.y = -0.235; el.add(band);
+      for (let i = 0; i < 7; i++) { const an = i / 7 * 6.283, st = ball(0.011, metal, Math.sin(an) * 0.06, -0.25, Math.cos(an) * 0.06); el.add(st); }
+      el.add(ball(0.06, skin, 0, -0.3, 0, 1, 1.1, 1));
+      arms.push({ sh, el, side });
+    });
+
+    headGrp = new THREE.Group(); headGrp.position.y = 0.7; torso.add(headGrp);
+    headGrp.add(ball(0.2, skin, 0, 0.15, 0.01, 0.92, 1.08, 1));
+    headGrp.add(ball(0.13, skin, 0, 0.05, 0.07, 0.95, 0.9, 1));
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.07, 8), skin); nose.rotation.x = Math.PI / 2 - 0.2; nose.position.set(0, 0.12, 0.22); headGrp.add(nose);
+    headGrp.add(ball(0.045, beard, 0, -0.03, 0.15, 0.9, 1.5, 0.8));
+    [-1, 1].forEach(sd => {
+      headGrp.add(ball(0.04, skin, sd * 0.18, 0.15, 0, 0.5, 1, 0.9));
+      headGrp.add(ball(0.018, dark, sd * 0.075, 0.18, 0.192, 1.2, 0.8, 0.6));
+      const br = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.014, 0.02), beard); br.position.set(sd * 0.075, 0.225, 0.19); br.rotation.set(0, -sd * 0.12, sd * 0.15); headGrp.add(br);
+    });
+    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.01, 0.02), new THREE.MeshBasicMaterial({ color: 0x7a3b30 })); mouth.position.set(0, 0.03, 0.195); mouth.rotation.z = 0.08; headGrp.add(mouth);
+
+    [
+      { x: 0, n: 22, a0: 1.0, hs: 1, tiltZ: 0 },
+      { x: -0.03, n: 21, a0: 0.94, hs: 0.85, tiltZ: -0.11 },
+      { x: 0.03, n: 21, a0: 0.94, hs: 0.85, tiltZ: 0.11 }
+    ].forEach(({x, n, a0, hs, tiltZ}) => {
+      for (let i = 0; i < n; i++) {
+        const a = a0 - i * 0.115, h = (0.2 + 0.3 * Math.cos(a * 1.05)) * hs;
+        const k = Math.sqrt(1 - (Math.abs(x) / 0.184) * (Math.abs(x) / 0.184)) * 0.97;
+        const geo = new THREE.ConeGeometry(0.048, h, 6); geo.translate(0, h / 2, 0);
+        const sp = new THREE.Mesh(geo, green);
+        sp.position.set(x, 0.15 + Math.cos(a) * 0.216 * k, 0.01 + Math.sin(a) * 0.2 * k);
+        sp.rotation.z = tiltZ;
+        sp.userData.base = a * 0.85 + 0.1; sp.userData.i = i + x * 20;
+        headGrp.add(sp); spikes.push(sp);
+      }
+    });
+
+    [
+      { x: 0, n: 8, a0: -1.42, hs: 0.7, tiltZ: 0 },
+      { x: -0.025, n: 7, a0: -1.42, hs: 0.6, tiltZ: -0.08 },
+      { x: 0.025, n: 7, a0: -1.42, hs: 0.6, tiltZ: 0.08 }
+    ].forEach(({x, n, a0, hs, tiltZ}) => {
+      for (let i = 0; i < n; i++) {
+        const a = a0 - i * 0.12, h = (0.15 + 0.15 * Math.cos(a)) * hs;
+        const k = Math.sqrt(1 - (Math.abs(x) / 0.184) * (Math.abs(x) / 0.184)) * 0.97;
+        const geo = new THREE.ConeGeometry(0.038, h, 6); geo.translate(0, h / 2, 0);
+        const sp = new THREE.Mesh(geo, green);
+        sp.position.set(x, 0.15 + Math.cos(a) * 0.216 * k, 0.01 + Math.sin(a) * 0.2 * k);
+        sp.rotation.z = tiltZ;
+        sp.rotation.x = -0.5 - i * 0.1;
+        sp.userData.base = a * 0.85 + 0.1; sp.userData.i = i + x * 20;
+        headGrp.add(sp); spikes.push(sp);
+      }
+    });
+
+    scene.add(playerGroup);
+  }
+
+  function blobShape(baseR){
+    // Nepravidelný obrys místo dokonalého kruhu - náhodný poloměr v každém
+    // bodě dělá z každé kaluže jiný, "rozlitý" tvar.
+    const shape = new THREE.Shape();
+    const N = 10;
+    for(let i=0;i<=N;i++){
+      const a = (i/N)*Math.PI*2;
+      const r = baseR * (0.72 + Math.random()*0.5);
+      const x = Math.cos(a)*r, y = Math.sin(a)*r;
+      if(i===0) shape.moveTo(x,y); else shape.lineTo(x,y);
+    }
+    shape.closePath();
+    return shape;
+  }
+
+  function createPuddle(){
+    // Kaluž = skupina dvou nepravidelných "kaluží" nad sebou (světlejší podklad
+    // + tmavší, posunuté jádro) => dojem hloubky/lesku místo ploché barvy.
+    // Barevný odstín je navíc pokaždé mírně jiný (náhodné HSL).
+    const g = new THREE.Group();
+    const hue = 0.12 + Math.random()*0.05;
+    const baseColor = new THREE.Color().setHSL(hue, 0.7, 0.4 + Math.random()*0.1);
+    const innerColor = baseColor.clone().offsetHSL(0, 0.05, -0.14);
+
+    const outer = new THREE.Mesh(
+      new THREE.ShapeGeometry(blobShape(0.85 + Math.random()*0.25), 12),
+      new THREE.MeshPhongMaterial({color:baseColor, specular:0xffffff, shininess:130, transparent:true, opacity:0.78})
+    );
+    outer.rotation.x = -Math.PI/2; outer.position.y = 0.015; g.add(outer);
+
+    const inner = new THREE.Mesh(
+      new THREE.ShapeGeometry(blobShape(0.5 + Math.random()*0.2), 10),
+      new THREE.MeshPhongMaterial({color:innerColor, specular:0xffffff, shininess:170, transparent:true, opacity:0.72})
+    );
+    inner.rotation.x = -Math.PI/2;
+    inner.position.set((Math.random()-0.5)*0.25, 0.02, (Math.random()-0.5)*0.25);
+    g.add(inner);
+
+    g.rotation.y = Math.random()*Math.PI*2;
+    const s = 0.85 + Math.random()*0.35;
+    g.scale.set(s, 1, s);
+    return g;
+  }
+
+  function createBottle(){
+    const g = new THREE.Group();
+    const glassMat = new THREE.MeshLambertMaterial({color:0x2e7d32});
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.2,0.5,10), glassMat);
+    body.position.y=0.25; g.add(body);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.1,0.22,10), glassMat);
+    neck.position.y=0.6; g.add(neck);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.075,0.075,0.06,10), new THREE.MeshLambertMaterial({color:0xcccccc}));
+    cap.position.y=0.74; g.add(cap);
+    return g;
+  }
+
+  function createCoin(){
+    const mat = new THREE.MeshLambertMaterial({color:0xffd83d, emissive:0x553600});
+    const geo = new THREE.CylinderGeometry(0.28,0.28,0.07,16);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = Math.PI/2;
+    return mesh;
+  }
+
+  // Vytaženo z herní smyčky do vlastní funkce, aby šlo stejným kódem "narovnat"
+  // postavu i na úvodní obrazovce (viz volání níže) - dřív se nohy/pánev
+  // dopočítaly (pelvis.position.y = -low) jen během běhu, takže na startu
+  // postava neměla nastavené -low a vypadala "utopená v zemi".
+  function applyPose(){
+    const S = Math.sin(phase);
+    let low = 0;
+    legs.forEach((L, i) => {
+      const p = phase + (i ? Math.PI : 0), q = legPose(p);
+      L.hip.rotation.x = -q.f; L.knee.rotation.x = q.k; L.ankle.rotation.x = q.a;
+      low = Math.min(low, footInfo(p).low);
+    });
+    pelvis.position.y = -low;
+    pelvis.position.x = Math.sin(phase) * 0.012;
+    pelvis.rotation.y = 0.12 * S;
+
+    torso.rotation.x = 0.2 + 0.025 * Math.cos(phase * 2);
+    torso.rotation.y = -0.24 * S;
+    torso.rotation.z = 0.025 * Math.cos(phase);
+    headGrp.rotation.x = -0.17 - 0.02 * Math.cos(phase * 2);
+    headGrp.rotation.y = 0.14 * S;
+    headGrp.rotation.z = -torso.rotation.z;
+
+    arms.forEach((A, i) => {
+      const pa = phase + (i ? 0 : Math.PI), s = Math.sin(pa);
+      A.sh.rotation.x = -(0.1 + 0.75 * s);
+      A.sh.rotation.z = A.side * 0.1;
+      A.el.rotation.x = -(1.35 + 0.4 * s);
+    });
+
+    spikes.forEach(sp => {
+      sp.rotation.x = sp.userData.base - 0.1 + 0.1 * Math.sin(T * 13 + sp.userData.i * 0.7) + 0.08 * Math.cos(phase * 2);
+    });
+  }
+
+  // Textura nápisu POLICIE na záda bundy policisty.
+  function policieTexture() {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 128;
+    const cx = c.getContext('2d');
+    cx.clearRect(0, 0, 512, 128);
+    cx.fillStyle = '#f4f4f4'; cx.font = 'bold 78px Arial'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
+    cx.fillText('POLICIE', 256, 68);
+    return new THREE.CanvasTexture(c);
+  }
+
+  function buildCop() {
+    copRoot = new THREE.Group();
+    copRoot.scale.set(0.53, 0.53, 0.53); // o něco menší než punkáč (0.6), aby výškou (bez číra) seděl
+    copGroup = new THREE.Group();
+    copGroup.add(copRoot);
+    copGroup.visible = false;
+    scene.add(copGroup);
+
+    const navy = new THREE.MeshLambertMaterial({ color: 0x162a4d });
+    const shirt = new THREE.MeshStandardMaterial({ color: 0x2f5b8f, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide });
+    const skin = new THREE.MeshLambertMaterial({ color: 0xe8b998 });
+    const cboot = new THREE.MeshLambertMaterial({ color: 0x0a0a0a });
+    const csole = new THREE.MeshLambertMaterial({ color: 0x050505 });
+    const cbelt = new THREE.MeshLambertMaterial({ color: 0x101010 });
+    const gold = new THREE.MeshStandardMaterial({ color: 0xd8b23a, roughness: 0.3, metalness: 0.85 });
+    const cdark = new THREE.MeshBasicMaterial({ color: 0x0b0b0b });
+    const hair = new THREE.MeshLambertMaterial({ color: 0x2a1c12 });
+    const peakMat = new THREE.MeshStandardMaterial({ color: 0x0b0b0b, roughness: 0.25, metalness: 0.3, side: THREE.DoubleSide });
+    const backText = new THREE.MeshBasicMaterial({ map: policieTexture(), transparent: true, side: THREE.DoubleSide });
+
+    copPelvis = new THREE.Group(); copRoot.add(copPelvis);
+    copPelvis.add(ball(0.21, navy, 0, 0.02, 0, 1.1, 0.78, 0.92));
+
+    [-1, 1].forEach(side => {
+      const hip = new THREE.Group(); hip.position.set(side * 0.105, 0, 0);
+      hip.add(ball(0.13, navy));
+      hip.add(tube(0.13, 0.09, L1, navy));
+      const knee = new THREE.Group(); knee.position.y = -L1; hip.add(knee);
+      knee.add(ball(0.09, navy));
+      knee.add(tube(0.09, 0.067, L2, navy));
+      const shaft = tube(0.079, 0.079, 0.14, cboot); shaft.position.y = -L2 + 0.13; knee.add(shaft);
+      const ankle = new THREE.Group(); ankle.position.y = -L2; knee.add(ankle);
+      const upper = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.09, 0.26), cboot); upper.position.set(0, -0.03, 0.06); ankle.add(upper);
+      ankle.add(ball(0.07, cboot, 0, -0.03, 0.19, 1, 0.75, 1.1));
+      const sl = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.035, 0.31), csole); sl.position.set(0, -0.06, 0.07); ankle.add(sl);
+      copPelvis.add(hip);
+      copLegs.push({ hip, knee, ankle, side });
+    });
+
+    copTorso = new THREE.Group(); copTorso.position.y = 0.06; copPelvis.add(copTorso);
+    const prof = [[0.001,0],[0.22,0],[0.27,0.1],[0.32,0.22],[0.335,0.35],[0.31,0.48],[0.26,0.57],[0.13,0.62],[0.001,0.63]]
+      .map(p => new THREE.Vector2(p[0], p[1]));
+    const body = new THREE.Mesh(new THREE.LatheGeometry(prof, 20), shirt);
+    body.scale.set(1.08, 1, 0.78); copTorso.add(body);
+    copTorso.add(ball(0.2, shirt, 0, 0.24, 0.12, 1, 0.85, 0.85));
+    [-1, 1].forEach(sd => {
+      const pk = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.1, 0.012), navy);
+      pk.position.set(sd * 0.13, 0.42, 0.235); copTorso.add(pk);
+      const btn = new THREE.Mesh(new THREE.SphereGeometry(0.008, 6, 6), gold); btn.position.set(sd * 0.13, 0.38, 0.24); copTorso.add(btn);
+      const ep = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.02, 0.2), navy);
+      ep.position.set(sd * 0.28, 0.575, 0.02); ep.rotation.z = -sd * 0.05; copTorso.add(ep);
+    });
+    for (let i = 0; i < 5; i++) copTorso.add(ball(0.011, gold, 0, 0.1 + i * 0.095, 0.245 - i * 0.006));
+    const badge = new THREE.Mesh(new THREE.CircleGeometry(0.035, 16), gold); badge.position.set(-0.15, 0.5, 0.245); badge.rotation.y = 0.35; copTorso.add(badge);
+    const beltMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.245, 0.245, 0.06, 22, 1, true), cbelt);
+    beltMesh.position.y = 0.06; beltMesh.scale.set(1.08, 1, 0.8); copTorso.add(beltMesh);
+    const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.015), gold); buckle.position.set(0, 0.06, 0.245); copTorso.add(buckle);
+    const neck = tube(0.078, 0.088, 0.16, skin, 12); neck.position.y = 0.68; copTorso.add(neck);
+    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.22, 0.015), navy); tie.position.set(0, 0.55, 0.235); copTorso.add(tie);
+    const backLabel = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.08), backText);
+    backLabel.position.set(0, 0.42, -0.265); copTorso.add(backLabel);
+
+    [-1, 1].forEach(side => {
+      const sh = new THREE.Group(); sh.position.set(side * 0.335, 0.5, 0); copTorso.add(sh);
+      sh.add(ball(0.1, shirt));
+      sh.add(tube(0.093, 0.07, 0.29, shirt));
+      const el = new THREE.Group(); el.position.y = -0.29; sh.add(el);
+      el.add(ball(0.07, shirt));
+      el.add(tube(0.07, 0.055, 0.14, shirt, 10));
+      const cuff = tube(0.052, 0.052, 0.03, navy, 10); cuff.position.y = -0.155; el.add(cuff);
+      const hand = tube(0.05, 0.05, 0.11, skin, 10); hand.position.y = -0.155; el.add(hand);
+      el.add(ball(0.06, skin, 0, -0.29, 0, 1, 1.15, 1));
+      copArms.push({ sh, el, side });
+    });
+
+    // Obušek v pravé ruce policisty
+    const batonMat = new THREE.MeshStandardMaterial({ color: 0x1b1b1b, roughness: 0.4, metalness: 0.3 });
+    const batonGripMat = new THREE.MeshStandardMaterial({ color: 0x2e2e2e, roughness: 0.6 });
+    copBaton = new THREE.Group();
+    const batonShaft = tube(0.022, 0.022, 0.42, batonMat, 10); batonShaft.position.y = -0.21; copBaton.add(batonShaft);
+    const batonGrip = tube(0.028, 0.028, 0.12, batonGripMat, 10); batonGrip.position.y = 0.06; copBaton.add(batonGrip);
+    copBaton.position.set(0, -0.30, 0.04);
+    copBaton.rotation.x = -0.25;
+    copArms[1].el.add(copBaton);
+
+    copHeadGrp = new THREE.Group(); copHeadGrp.position.y = 0.7; copTorso.add(copHeadGrp);
+    copHeadGrp.add(ball(0.205, skin, 0, 0.15, 0.01, 0.98, 1.02, 1));
+    copHeadGrp.add(ball(0.15, skin, 0, 0.02, 0.06, 1.0, 0.85, 1));
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.06, 8), skin); nose.rotation.x = Math.PI / 2 - 0.15; nose.position.set(0, 0.13, 0.22); copHeadGrp.add(nose);
+    const mustache = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.025, 0.02), hair); mustache.position.set(0, 0.075, 0.205); copHeadGrp.add(mustache);
+    [-1, 1].forEach(sd => {
+      copHeadGrp.add(ball(0.042, skin, sd * 0.185, 0.15, 0, 0.5, 1, 0.9));
+      copHeadGrp.add(ball(0.017, cdark, sd * 0.08, 0.18, 0.193, 1.2, 0.8, 0.6));
+      const br = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.012, 0.02), hair); br.position.set(sd * 0.08, 0.22, 0.19); br.rotation.set(0, -sd * 0.1, sd * 0.08); copHeadGrp.add(br);
+    });
+    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.01, 0.02), new THREE.MeshBasicMaterial({ color: 0x7a3b30 })); mouth.position.set(0, 0.025, 0.195); copHeadGrp.add(mouth);
+    const hairPatch = new THREE.Mesh(new THREE.SphereGeometry(0.207, 16, 12, 0, Math.PI * 2, Math.PI * 0.42, Math.PI * 0.4), hair);
+    hairPatch.position.set(0, 0.16, -0.005); copHeadGrp.add(hairPatch);
+
+    const capGrp = new THREE.Group(); capGrp.position.set(0, 0.31, -0.01); copHeadGrp.add(capGrp);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.205, 0.212, 0.07, 24), navy); band.position.y = 0.035; capGrp.add(band);
+    const bandTrim = new THREE.Mesh(new THREE.TorusGeometry(0.212, 0.006, 6, 24), gold); bandTrim.rotation.x = Math.PI / 2; bandTrim.position.y = 0.068; capGrp.add(bandTrim);
+    const saucer = new THREE.Mesh(new THREE.CylinderGeometry(0.255, 0.235, 0.05, 24), navy); saucer.position.y = 0.09; capGrp.add(saucer);
+    const saucerTop = new THREE.Mesh(new THREE.CircleGeometry(0.255, 24), navy); saucerTop.rotation.x = -Math.PI / 2; saucerTop.position.y = 0.115; capGrp.add(saucerTop);
+    const saucerEdge = new THREE.Mesh(new THREE.TorusGeometry(0.255, 0.006, 6, 24), cdark); saucerEdge.rotation.x = Math.PI / 2; saucerEdge.position.y = 0.113; capGrp.add(saucerEdge);
+    const peak = new THREE.Mesh(new THREE.CylinderGeometry(0.205, 0.205, 0.016, 28), peakMat);
+    peak.scale.set(1, 1, 0.39); peak.rotation.x = -0.08; peak.position.set(0, -0.01, 0.25); capGrp.add(peak);
+    const capBadge = new THREE.Mesh(new THREE.CircleGeometry(0.026, 16), gold); capBadge.position.set(0, 0.04, 0.211); capGrp.add(capBadge);
+    const capBadgeRim = new THREE.Mesh(new THREE.RingGeometry(0.026, 0.032, 16), gold); capBadgeRim.position.set(0, 0.04, 0.2105); capGrp.add(capBadgeRim);
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.02, 0.006), cdark); strap.position.set(0, 0.02, 0.19); capGrp.add(strap);
+    [-1, 1].forEach(sd => { const btn = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 8), gold); btn.position.set(sd * 0.205, 0.02, 0.16); capGrp.add(btn); });
+  }
+
+  // Běžecká animace policisty - stejný princip jako applyPose() u punkáče,
+  // jen bez bodlin (spikes) a s vlastními copLegs/copArms/copPelvis/... referencemi.
+  function applyCopPose(p){
+    const S = Math.sin(p);
+    let low = 0;
+    copLegs.forEach((L, i) => {
+      const pp = p + (i ? Math.PI : 0), q = legPose(pp);
+      L.hip.rotation.x = -q.f; L.knee.rotation.x = q.k; L.ankle.rotation.x = q.a;
+      low = Math.min(low, footInfo(pp).low);
+    });
+    copPelvis.position.y = -low;
+    copPelvis.position.x = Math.sin(p) * 0.012;
+    copPelvis.rotation.y = 0.1 * S;
+    copTorso.rotation.x = 0.16 + 0.02 * Math.cos(p * 2);
+    copTorso.rotation.y = -0.2 * S;
+    copTorso.rotation.z = 0.02 * Math.cos(p);
+    copHeadGrp.rotation.x = -0.13 - 0.015 * Math.cos(p * 2);
+    copHeadGrp.rotation.y = 0.11 * S;
+    copHeadGrp.rotation.z = -copTorso.rotation.z;
+    copArms.forEach((A, i) => {
+      const pa = p + (i ? 0 : Math.PI), s = Math.sin(pa);
+      A.sh.rotation.x = -(0.1 + 0.65 * s);
+      A.sh.rotation.z = A.side * 0.12;
+      A.el.rotation.x = -(1.25 + 0.35 * s);
+    });
+  }
+
+  function initThree(){
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f1220);
+    scene.fog = new THREE.Fog(0x0f1220, 18, 85);
+
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 200);
+    camera.position.set(0,4.3,7.4);
+    camera.lookAt(0,1.3,-12);
+
+    renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+    resize();
+
+    // Vylepšené nasvícení pro detailní auto i postavu
+    scene.add(new THREE.HemisphereLight(0xddeeff,0x20252b,0.8));
+    const key=new THREE.DirectionalLight(0xffffff,1.2);key.position.set(-5,8,6);scene.add(key);
+    const rim=new THREE.DirectionalLight(0x397dff,0.6);rim.position.set(5,4,-6);scene.add(rim);
+
+    const roadMat = new THREE.MeshLambertMaterial({color:0x2b2b33});
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(7.6,300), roadMat);
+    road.rotation.x = -Math.PI/2; road.position.set(0,0,-130); scene.add(road);
+
+    // Široký podklad terénu po stranách silnice - dřív za obrubníky žádná
+    // plocha nebyla, takže domy visely ve vzduchu bez podloží pod sebou.
+    const groundMat = new THREE.MeshLambertMaterial({color:0x14161f});
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(26,300), groundMat);
+    ground.rotation.x = -Math.PI/2; ground.position.set(0,-0.02,-130); scene.add(ground);
+
+    const curbMat = new THREE.MeshLambertMaterial({color:0xe8e8e8});
+    const curbGeo = new THREE.BoxGeometry(0.3,0.3,300);
+    const cL = new THREE.Mesh(curbGeo,curbMat); cL.position.set(-3.95,0.1,-130); scene.add(cL);
+    const cR = new THREE.Mesh(curbGeo,curbMat); cR.position.set(3.95,0.1,-130); scene.add(cR);
+
+    const dashMat = new THREE.MeshBasicMaterial({color:0xffffff});
+    const dashGeo = new THREE.BoxGeometry(0.1,0.04,1.3);
+    const lineX1 = (laneX[0]+laneX[1])/2, lineX2 = (laneX[1]+laneX[2])/2;
+    for(let i=0;i<14;i++){
+      const m1 = new THREE.Mesh(dashGeo, dashMat); m1.position.set(lineX1, 0.03, -i*4); scene.add(m1); dashes.push({mesh:m1, x:lineX1});
+      const m2 = new THREE.Mesh(dashGeo, dashMat); m2.position.set(lineX2, 0.03, -i*4); scene.add(m2); dashes.push({mesh:m2, x:lineX2});
+    }
+
+    // Textura oken pro fasádu domu: mřížka okének, jen část (~22 %) svítí.
+    // MeshBasicMaterial (bez vlivu osvětlení scény), aby svítící okna opravdu
+    // vypadala jako zdroj světla, ne jen jako nasvícená plocha.
+    function windowTexture(cols, rows){
+      const cw=16, ch=16;
+      const c = document.createElement('canvas'); c.width=cols*cw; c.height=rows*ch;
+      const cx = c.getContext('2d');
+      cx.fillStyle = '#12141c'; cx.fillRect(0,0,c.width,c.height);
+      for(let r=0;r<rows;r++){
+        for(let col=0;col<cols;col++){
+          const lit = Math.random() < 0.22;
+          cx.fillStyle = lit ? (Math.random()<0.5?'#ffe9a8':'#bfe3ff') : '#232838';
+          cx.fillRect(col*cw+3, r*ch+3, cw-6, ch-6);
+        }
+      }
+      return new THREE.CanvasTexture(c);
+    }
+
+    // Siluety budov po stranách - dřív byla za obrubníky jen mlha/prázdno,
+    // což na obrazovce působilo prázdně. Recyklují se stejně jako čárky na silnici.
+    const capMat = new THREE.MeshLambertMaterial({color:0x11131a});
+    for(const side of [-1,1]){
+      for(let i=0;i<16;i++){
+        const h = 3 + Math.random()*7, w = 2.2 + Math.random()*2.4;
+        const cols = Math.max(2, Math.round(w*2.2)), rows = Math.max(3, Math.round(h*1.8));
+        const sideMat = new THREE.MeshBasicMaterial({map:windowTexture(cols, rows)});
+        const b = new THREE.Mesh(new THREE.BoxGeometry(w,h,w), [sideMat,sideMat,capMat,capMat,sideMat,sideMat]);
+        b.position.set(side*(5.2+Math.random()*3.5), h/2, -i*9 - Math.random()*5);
+        scene.add(b);
+        buildings.push(b);
+      }
+    }
+
+    buildPlayer();
+    applyPose(); // narovná postavu (viz komentář u applyPose) hned na startu, ne až v prvním loop()
+    buildCop();
+    copGroup.position.copy(COP_START_POS);
+    // Natočení čelem ve směru běhu (od COP_START_POS k COP_END_POS).
+    const copDir = new THREE.Vector3().subVectors(COP_END_POS, COP_START_POS);
+    copGroup.rotation.y = Math.atan2(copDir.x, copDir.z);
+    buildIntroScene();
+  }
+
+  // Konec proudu leží přímo na bočním panelu auta (dřív mířil dovnitř karoserie,
+  // takže byl rozprsk schovaný uvnitř laku a nebyl vidět).
+  const PEE_END = new THREE.Vector3(1.28, 0.5, -0.5);
+  let introT0, introPrevT, stopping = false, stopT = 0;
+  let autoAdvance = false, autoAdvanceAt = 1.7;
+
+  function peeTexture(){
+    // Pruhovaná textura, kterou posouváme podél délky (map.offset.y) - tím
+    // vzniká dojem tekoucí kapaliny, ne jen statické trubice/pásu.
+    const c = document.createElement('canvas'); c.width=8; c.height=32;
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#ffd83d'; cx.fillRect(0,0,8,32);
+    cx.fillStyle = '#fff6b0'; cx.fillRect(0,0,8,12);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(1,5);
+    return t;
+  }
+  function splashTexture(){
+    const c = document.createElement('canvas'); c.width=64; c.height=64;
+    const cx = c.getContext('2d');
+    const g = cx.createRadialGradient(32,32,2,32,32,30);
+    g.addColorStop(0,'rgba(255,245,180,.95)'); g.addColorStop(.55,'rgba(255,216,61,.55)'); g.addColorStop(1,'rgba(255,216,61,0)');
+    cx.fillStyle = g; cx.fillRect(0,0,64,64);
+    return new THREE.CanvasTexture(c);
+  }
+  function puddleTexture(){
+    const c = document.createElement('canvas'); c.width=96; c.height=96;
+    const cx = c.getContext('2d');
+    const g = cx.createRadialGradient(48,48,4,48,48,46);
+    g.addColorStop(0,'rgba(255,224,90,.85)'); g.addColorStop(.6,'rgba(214,184,50,.6)'); g.addColorStop(.85,'rgba(180,150,30,.35)'); g.addColorStop(1,'rgba(180,150,30,0)');
+    cx.fillStyle = g; cx.fillRect(0,0,96,96);
+    return new THREE.CanvasTexture(c);
+  }
+
+  function buildIntroScene(autoStartLoop){
+    if(autoStartLoop===undefined) autoStartLoop = true;
+    // Postavu na úvodní obrazovce natočíme čelem k autu (jinak stojí zády).
+    playerGroup.rotation.y = -Math.PI/2;
+
+    introCar = getPoliceCar();
+    introCar.position.set(2.1, 0, -0.6);
+    scene.add(introCar);
+
+    const streamMat = new THREE.MeshBasicMaterial({map:peeTexture(), transparent:true, opacity:0.9});
+    const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(), new THREE.Vector3(), PEE_END);
+    peeStream = new THREE.Mesh(new THREE.TubeGeometry(curve,20,0.02,8,false), streamMat);
+    scene.add(peeStream);
+
+    // Kruh dopadu na karoserii + pramínky, které po ní stékají.
+    const splashMat = new THREE.MeshBasicMaterial({map:splashTexture(), transparent:true, depthWrite:false});
+    splashCircle = new THREE.Mesh(new THREE.CircleGeometry(0.22,24), splashMat);
+    splashCircle.position.set(PEE_END.x-0.015, PEE_END.y, PEE_END.z); splashCircle.rotation.y = -Math.PI/2;
+    scene.add(splashCircle);
+    drips = [];
+    for(let i=0;i<3;i++){
+      const h = 0.5+i*0.15;
+      const g = new THREE.PlaneGeometry(0.05,h); g.translate(0,-h/2,0);
+      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({map:peeTexture(), transparent:true, opacity:0.6, depthWrite:false}));
+      m.position.set(PEE_END.x-0.015, PEE_END.y-0.02, PEE_END.z+(i-1)*0.07); m.rotation.y = -Math.PI/2;
+      scene.add(m); drips.push(m);
+    }
+    // Louže na zemi pod autem - pomalu roste, jak dlouho pramínky stékají.
+    const puddleMat = new THREE.MeshBasicMaterial({map:puddleTexture(), transparent:true, depthWrite:false});
+    puddle = new THREE.Mesh(new THREE.CircleGeometry(1,28), puddleMat);
+    puddle.rotation.x = -Math.PI/2; puddle.position.set(PEE_END.x-0.05, 0.012, PEE_END.z);
+    puddle.scale.set(0.001,0.001,1); scene.add(puddle);
+
+    // Kamera pro úvodní scénu: bokorys na postavu i auto, místo herního pohledu zezadu.
+    camera.position.copy(INTRO_CAM_POS);
+    camera.lookAt(INTRO_LOOKAT);
+
+    introT0 = undefined;
+    if(autoStartLoop) requestAnimationFrame(introLoop);
+  }
+
+  // Klidový postoj místo zmrzlé běžecké fáze + rozhlížení kolem sebe.
+  function applyIntroPose(time){
+    const breathe = Math.sin(time*1.1)*0.015;
+    legs.forEach(L => { L.hip.rotation.x=-0.08; L.knee.rotation.x=0.16; L.ankle.rotation.x=-0.08; });
+    pelvis.position.set(0, 0.87+breathe*0.3, 0); pelvis.rotation.y = 0;
+    torso.rotation.x = 0.12+breathe; torso.rotation.y = 0.04*Math.sin(time*0.5); torso.rotation.z = 0;
+    headGrp.rotation.x = -0.1 + 0.14*Math.sin(time*0.85+0.4); // přikyvování nahoru/dolů
+    const s = -Math.sin(time*0.55);
+    headGrp.rotation.y = Math.sign(s)*Math.pow(Math.abs(s),0.5)*1.15; // rychlé otočení - nejdřív do kamery, pak na druhou stranu
+    headGrp.rotation.z = 0.03*Math.sin(time*0.3+0.5);
+    arms.forEach(A => {
+      if(A.side===1){ A.sh.rotation.x=-1.25; A.sh.rotation.z=A.side*0.15; A.el.rotation.x=-1.55; }
+      else { A.sh.rotation.x=-0.12+0.03*Math.sin(time*0.6); A.sh.rotation.z=A.side*0.08; A.el.rotation.x=-0.22; }
+    });
+    spikes.forEach(sp => { sp.rotation.x = sp.userData.base-0.1+0.06*Math.sin(time*3+sp.userData.i*0.7); });
+  }
+
+  function introLoop(t){
+    if(!introActive) return;
+    if(introT0===undefined){ introT0 = t; introPrevT = t; }
+    const time = (t-introT0)/1000;
+    const dt = Math.min((t-introPrevT)/1000, 0.05); introPrevT = t;
+
+    applyIntroPose(time);
+
+    // Po restartu se cajt spustí sám - punkáč chvíli počůrává auto a pak
+    // (bez čekání na klik) přiběhne policista úplně stejně jako při první hře.
+    if(autoAdvance && !stopping && time>=autoAdvanceAt){ beginStop(); }
+
+    if(copActive){
+      copT += dt;
+      const ctt = Math.min(copT/COP_RUN_DURATION, 1);
+      const cease = ctt<0.5 ? 2*ctt*ctt : 1-Math.pow(-2*ctt+2,2)/2; // easeInOutQuad
+      copGroup.position.lerpVectors(COP_START_POS, COP_END_POS, cease);
+      copPhase += dt*9;
+      applyCopPose(copPhase);
+      if(ctt>=1) copActive = false;
+    }
+
+    // Fáze 1 (0 - PEE_STOP_DUR): dočůrá. Fáze 2 (až poté): teprve se otáčí.
+    const PEE_STOP_DUR = 0.4, TURN_DUR = 0.6;
+    if(stopping){
+      stopT += dt;
+      const turnP = Math.max(0, Math.min((stopT-PEE_STOP_DUR)/TURN_DUR, 1));
+      const ease = turnP<0.5 ? 2*turnP*turnP : 1-Math.pow(-2*turnP+2,2)/2;
+      playerGroup.rotation.y = -Math.PI/2 + ease*(Math.PI/2); // plynulé otočení čelem k trati, až KDYŽ dočůral
+    }
+
+    // Proud teče normálně, dokud nedáme start; pak se plynule "utne" u těla.
+    const flowFade = stopping ? Math.max(0, 1-stopT/PEE_STOP_DUR) : 1;
+    peeStream.visible = flowFade>0;
+    // Zvuk proudu - naplánujeme ho hned, jak existuje audioCtx, i když ještě
+    // čeká na potvrzený stav "running" (resume() se vyřeší asynchronně).
+    // Dřív se čekalo na state==='running', což se ale u úplně prvního
+    // kliknutí na HRAT stihlo vyřešit až PO doběhnutí čůrání - proto zvuk
+    // v úvodní scéně chyběl a objevil se až po restartu (audio už bylo hotové).
+    if(audioCtx){
+      if(!peeNoiseSource) startPeeSound();
+      setPeeVolume(flowFade>0 ? 0.1*flowFade : 0);
+    }
+    if(flowFade>0){
+      const startW = new THREE.Vector3(); peeAnchor.getWorldPosition(startW);
+      const wob = Math.sin(time*7)*0.09;
+      const ctrl = new THREE.Vector3().lerpVectors(startW, PEE_END, 0.45); ctrl.y += 0.55+wob; ctrl.z += wob*0.6;
+      const curve = new THREE.QuadraticBezierCurve3(startW, ctrl, PEE_END);
+      peeStream.geometry.dispose();
+      peeStream.geometry = new THREE.TubeGeometry(curve,20,(0.02+Math.abs(wob)*0.015)*flowFade,8,false);
+      peeStream.material.map.offset.y = -time*2.2;
+      peeStream.material.opacity = 0.9*flowFade;
+    }
+
+    // Poslední kapky stečou do louže, pak i rozprsk a pramínky zmizí (souběžně s otáčením).
+    const splashFade = stopping ? Math.max(0, 1-(stopT-PEE_STOP_DUR*0.5)/(PEE_STOP_DUR*0.5+TURN_DUR)) : 1;
+    splashCircle.material.opacity = (0.55 + 0.25*Math.abs(Math.sin(time*3))) * splashFade;
+    drips.forEach((d,i) => {
+      d.scale.y = 0.8+0.2*Math.abs(Math.sin(time*0.9+i*1.3));
+      d.material.map.offset.y = -time*(1.4+i*0.25);
+      d.material.opacity = (0.45+0.3*Math.abs(Math.sin(time*2+i))) * splashFade;
+    });
+    const lastDrop = stopping ? Math.min(stopT/PEE_STOP_DUR,1)*0.05 : 0;
+    const grow = Math.min(1, 1-Math.exp(-time/14) + lastDrop);
+    const r = 0.18+0.62*grow;
+    puddle.scale.set(r,r,1);
+    puddle.material.opacity = 0.75+0.15*Math.abs(Math.sin(time*1.5));
+
+    renderer.render(scene, camera);
+
+    if(stopping && stopT>=PEE_STOP_DUR+TURN_DUR){ finishStart(); return; }
+    requestAnimationFrame(introLoop);
+  }
+
+  function beginStop(){
+    if(stopping || !introActive) return;
+    stopping = true; stopT = 0;
+    overlay.classList.add('hidden');
+    // Ve chvíli kliknutí na "HRAT" přiběhne do scény policista.
+    copActive = true; copT = 0; copPhase = 0;
+    copGroup.position.copy(COP_START_POS);
+    copGroup.visible = true;
+    playWhistleSound();
+  }
+
+  let running=false;
+  let moveSpeed, dist, score, coinScore, bottleScore, spawnCursorZ, lastSegmentId;
+  let currentLane, targetX, jumping, jumpT;
+  let obstacles, coins, bottles;
+
+  // --- "NAKLÁDAČKA": když punkáč skončí v louži nebo naboural auto, doběhne
+  // ho policista a několikrát ho praští obuškem, teprve pak přijde GAME OVER.
+  let busting = false, bustT = 0, bustType = null;
+  const BUST_RUN_DUR = 0.55, BUST_HIT_DUR = 1.1, BUST_HOLD_DUR = 0.4;
+  const BUST_TOTAL = BUST_RUN_DUR + BUST_HIT_DUR + BUST_HOLD_DUR;
+  // Poslední fáze běhu (frozen pózy nohou), aby při přechodu do bití
+  // nikdy neškublo pánví/nohama - kopírujeme si je z applyCopPose a dál
+  // se jich v bití vůbec nedotýkáme.
+  let bustCamBase, bustHitFired = false, camShake = 0;
+  let bustObstacle = null, bustObstacleZ0 = 0, bustObstacleScale0 = null;
+  const hitFlash = document.getElementById('hitFlash');
+  let bustZ = 0; // z-ová pozice punkáče při nakládačce (po odrazu od auta)
+
+  // --- SPLAT: při nárazu do auta se punkáč "rozplácne" přes kapotu / kufr.
+  // Auto zůstane stát (svět se zastaví), punkáč se od něj krátce odrazí,
+  // vyletí na plech, trup se mu překlopí přes hranu, ruce a nohy zůstanou
+  // viset. Konstanty jdou snadno doladit:
+  const SPLAT = {
+    HIT_DUR: 0.12,        // s: odraz / přisunutí k hraně auta
+    RISE_DUR: 0.18,       // s: vyhození nahoru na plech
+    FOLD_DUR: 0.20,       // s: překlopení trupu přes hranu
+    TORSO_LIE: 1.46,      // rad: úhel trupu na kapotě (1.57 = úplně vodorovně)
+    TORSO_LIE_REAR: 1.52, // rad: úhel trupu na kufru
+    ARM_WORLD: -1.72,     // rad: směr paží ve světě (-1.57 = rovně dopředu, víc = nahoru)
+    CLEAR: 0.15,          // výška osy trupu nad plechem
+    EDGE_GAP: 0.10        // odstup boků od hrany auta
+  };
+  const splat = { active: false };
+
+  function prepareSplat(car){
+    car.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(car);
+    const carX = car.position.x;
+    const zEnd = box.max.z; // konec auta, který je nejblíž punkáčovi
+    // Předek (kapota) auta míří k hráči, když sin(rotation.y) > 0 (viz createPoliceCarTemplate).
+    const frontToPlayer = Math.sin(car.rotation.y) > 0;
+    // Výška plechu (kapota/kufr) těsně za hranou - zjistíme paprskem shora.
+    let top = frontToPlayer ? 0.80 : 0.90;
+    try{
+      const rc = new THREE.Raycaster(new THREE.Vector3(carX, 4, zEnd-0.3), new THREE.Vector3(0,-1,0), 0, 8);
+      const hit = rc.intersectObject(car, true)[0];
+      if(hit) top = THREE.MathUtils.clamp(hit.point.y, 0.55, 1.15);
+    }catch(e){}
+
+    const p = playerGroup.position;
+    splat.x0 = p.x; splat.y0 = p.y; splat.z0 = p.z;
+    splat.xT = THREE.MathUtils.clamp(p.x, carX-0.35, carX+0.35); // ať leží na plechu, ne vedle
+    splat.zT = zEnd + SPLAT.EDGE_GAP;
+    const pivot = (pelvis.position.y + torso.position.y) * root.scale.y; // výška osy trupu nad zemí
+    splat.yT = top + SPLAT.CLEAR - pivot;
+    splat.lie = frontToPlayer ? SPLAT.TORSO_LIE : SPLAT.TORSO_LIE_REAR;
+    splat.torso = { x: torso.rotation.x, y: torso.rotation.y, z: torso.rotation.z };
+    splat.head = { x: headGrp.rotation.x, y: headGrp.rotation.y, z: headGrp.rotation.z };
+    splat.pelvisY = pelvis.rotation.y;
+    splat.legs = legs.map(L=>({ h: L.hip.rotation.x, k: L.knee.rotation.x, a: L.ankle.rotation.x }));
+    splat.arms = arms.map(A=>({ sx: A.sh.rotation.x, sz: A.sh.rotation.z, ex: A.el.rotation.x }));
+    splat.flashed = false;
+    splat.active = true;
+  }
+
+  function applySplatPose(t, jolt){
+    const s = splat, lerp = THREE.MathUtils.lerp;
+    const c01 = v=>Math.max(0, Math.min(1, v));
+    const outCubic = p=>1-Math.pow(1-p,3);
+    const outBack = (p,c1)=>{ const c3=c1+1; return 1 + c3*Math.pow(p-1,3) + c1*Math.pow(p-1,2); };
+
+    const eHit  = outCubic(c01(t/SPLAT.HIT_DUR));
+    const rise  = c01(t/SPLAT.RISE_DUR);
+    const eFold = outBack(c01((t-0.03)/SPLAT.FOLD_DUR), 1.0);
+    const eArm  = outBack(c01((t-0.05)/0.25), 1.4);
+    const eLeg  = outCubic(c01(t/0.25));
+    const slump = c01((t-0.3)/1.2);
+    const decay = Math.exp(-t*4);
+
+    // Odraz od auta + vyhození nahoru (s malým "hopem"), pak pomalé sesunutí.
+    playerGroup.position.x = lerp(s.x0, s.xT, eHit);
+    playerGroup.position.z = lerp(s.z0, s.zT, eHit);
+    playerGroup.position.y = lerp(s.y0, s.yT, outCubic(rise)) + 0.12*Math.sin(rise*Math.PI) - 0.03*slump - 0.04*jolt;
+    playerGroup.rotation.set(0,0,0);
+
+    // Trup se překlopí dopředu přes hranu a ustálí na plechu.
+    torso.rotation.x = lerp(s.torso.x, s.lie, eFold) + 0.06*jolt;
+    torso.rotation.y = lerp(s.torso.y, 0, eHit);
+    torso.rotation.z = lerp(s.torso.z, 0.05, eHit);
+    pelvis.rotation.y = lerp(s.pelvisY, 0, eHit);
+
+    // Hlava otočená bokem, tvář přimáčknutá k plechu.
+    headGrp.rotation.x = lerp(s.head.x, -0.4, eFold);
+    headGrp.rotation.y = lerp(s.head.y, 0.85, eFold);
+    headGrp.rotation.z = lerp(s.head.z, 0, eFold);
+
+    // Ruce rozhozené dopředu do "véčka" přes kapotu (úhel počítaný vůči světu).
+    arms.forEach((A,i)=>{
+      const a = s.arms[i], wave = decay*Math.sin(t*14+i*2.2)*0.18;
+      A.sh.rotation.x = lerp(a.sx, SPLAT.ARM_WORLD - s.lie, eArm) + wave;
+      A.sh.rotation.z = lerp(a.sz, A.side*0.65, eArm);
+      A.el.rotation.x = lerp(a.ex, -0.15, eArm);
+    });
+
+    // Nohy zůstanou viset za hranou auta a doznívá jim kmitání.
+    legs.forEach((L,i)=>{
+      const l = s.legs[i], sw = decay*Math.sin(t*15+i*1.5);
+      L.hip.rotation.x = lerp(l.h, 0.35, eLeg) + 0.35*sw + 0.3*jolt;
+      L.knee.rotation.x = lerp(l.k, 0.55, eLeg) + 0.25*decay*Math.sin(t*15+i*1.5+1.2);
+      L.ankle.rotation.x = lerp(l.a, 0.3, eLeg);
+    });
+
+    // PRÁSK! hned při nárazu.
+    if(!s.flashed && t>0.04){ s.flashed = true; flashHit(); }
+  }
+
+  function flashHit(){
+    camShake = 0.09;
+    hitFlash.textContent = ['PRÁSK!','BUM!','AU!'][Math.floor(Math.random()*3)];
+    hitFlash.style.opacity = '1';
+    hitFlash.style.transform = 'translate(-50%,-50%) scale(1)';
+    setTimeout(()=>{ hitFlash.style.opacity='0'; hitFlash.style.transform='translate(-50%,-50%) scale(0.6)'; }, 220);
+  }
+
+  function startBust(type, hitMesh){
+    if(busting) return;
+    busting = true; bustT = 0; bustType = type;
+    chaseActive = false;
+    copPhase = 0;
+    // Překážku, do které punkáč narazil, rychle "odmeteme" pryč po silnici
+    // (zmenší se a odjede dál), místo aby zmizela naráz nebo zůstala trčet na místě.
+    bustObstacle = hitMesh || null;
+    if(bustObstacle){
+      bustObstacleZ0 = bustObstacle.position.z;
+      bustObstacleScale0 = bustObstacle.scale.clone();
+    }
+    copGroup.visible = true;
+    copGroup.rotation.y = Math.PI;
+    playWhistleSound();
+    // Policista doběhne z většího odstupu a zastaví se vedle/za punkáčem,
+    // ne přímo v jedné ose s ním (aby se modely nepřekrývaly a bylo vidět obušek).
+    splat.active = false;
+    if(type==='car' && bustObstacle) prepareSplat(bustObstacle);
+    bustZ = splat.active ? splat.zT : playerGroup.position.z;
+    copGroup.position.set(playerGroup.position.x - 0.6, 0, bustZ + 4.4);
+    bustCamBase = camera.position.clone();
+    hitFlash.style.opacity = '0';
+  }
+
+  const BUST_STOP_Z = 1.7; // konečný odstup policisty od punkáče (dřív 0.85 = model do sebe zajížděl)
+
+  function updateBust(dt){
+    bustT += dt;
+    let jolt = 0; // otřes těla při ráně obuškem (pro splat pózu)
+    const draped = splat.active; // punkáč visí přes auto
+
+    // Punkáč se nikdy úplně nezastaví - jemné vrávorání (když nevisí přes auto).
+    playerGroup.rotation.z = draped ? 0 : Math.sin(bustT*8)*0.035;
+
+    // Odklizení překážky - jen když nejde o splat. Auto, přes které je punkáč
+    // přehozený, zůstává stát na místě.
+    if(bustObstacle && !draped){
+      const ck = Math.min(bustT/0.35, 1);
+      bustObstacle.position.z = bustObstacleZ0 + ck*10;
+      const f = Math.max(0.001, 1-ck);
+      bustObstacle.scale.set(bustObstacleScale0.x*f, bustObstacleScale0.y*f, bustObstacleScale0.z*f);
+      if(ck>=1){ scene.remove(bustObstacle); bustObstacle = null; }
+    }
+
+    if(bustT <= BUST_RUN_DUR){
+      // Fáze 1: policista přibíhá zezadu k punkáčovi.
+      const tt = Math.min(bustT/BUST_RUN_DUR, 1);
+      const ease = tt<0.5 ? 2*tt*tt : 1-Math.pow(-2*tt+2,2)/2;
+      copGroup.position.x = THREE.MathUtils.lerp(playerGroup.position.x-0.6, playerGroup.position.x-0.5, ease);
+      copGroup.position.z = THREE.MathUtils.lerp(bustZ + 4.4, bustZ + BUST_STOP_Z, ease);
+      copPhase += dt*22;
+      applyCopPose(copPhase);
+      if(!draped){
+        torso.rotation.x = 0.35;
+        headGrp.rotation.y = -0.4 * ease; // ohlédnutí dozadu
+        arms.forEach(A=>{ A.sh.rotation.x = -1.1; A.el.rotation.x = -0.5; });
+        if(bustType==='car'){
+          const k = Math.min(bustT/0.22, 1);
+          playerGroup.rotation.x = Math.sin(k*Math.PI)*0.12;
+        }
+      }
+    } else if(bustT <= BUST_RUN_DUR + BUST_HIT_DUR){
+      // Fáze 2: policista mlátí punkáče obuškem - nohy/pánev policisty se tu
+      // vůbec nemění (zůstávají v poslední běžecké póze), hýbe se jen horní
+      // polovina těla, takže nemůže "propadnout do země".
+      const ht = bustT - BUST_RUN_DUR;
+      copGroup.position.z = bustZ + BUST_STOP_Z;
+      const swings = 2;
+      const cyc = (ht/BUST_HIT_DUR)*swings;
+      const local = cyc % 1;
+      const raise = local<0.45 ? local/0.45 : 1-((local-0.45)/0.55);
+      const s = Math.max(0, raise);
+      copTorso.rotation.x = 0.18 + 0.32*s;
+      copTorso.rotation.y = 0.18;
+      copHeadGrp.rotation.x = -0.1; copHeadGrp.rotation.y = 0.15;
+      // Obušek: mírný, čitelný rozsah (podobný rozsahu, který se běžně
+      // používá i pro běžeckou animaci ruky) - ne extrémní zalomení.
+      copArms[1].sh.rotation.x = -(0.3 + 1.0*s);
+      copArms[1].sh.rotation.z = 0.3;
+      copArms[1].el.rotation.x = -(0.9 + 0.4*s);
+      copArms[0].sh.rotation.x = -0.5;
+      copArms[0].el.rotation.x = -0.8;
+
+      const impact = Math.max(0, 1-Math.abs(local-0.47)/0.09);
+      if(draped){
+        jolt = impact; // tělo na autě sebou při ráně škubne
+      } else {
+        torso.rotation.x = 0.4 + 0.25*impact;
+        headGrp.rotation.x = -0.1 + 0.25*impact;
+        playerGroup.position.y = -0.05*impact;
+        arms.forEach(A=>{ A.sh.rotation.x = -1.3 - 0.2*impact; A.el.rotation.x = -0.7; });
+      }
+
+      if(impact>0.9 && bustCamBase && !bustHitFired){
+        bustHitFired = true;
+        flashHit();
+      }
+      if(impact<0.3) bustHitFired = false;
+
+    } else {
+      // Fáze 3: krátká pauza na výsledné póze, než naskočí GAME OVER.
+      copTorso.rotation.x = 0.15; copTorso.rotation.y = 0.1;
+      copArms[1].sh.rotation.x = -0.5; copArms[1].el.rotation.x = -0.9;
+      if(!draped){
+        torso.rotation.x = 0.6; headGrp.rotation.x = 0.1;
+        playerGroup.position.y = -0.06;
+      }
+    }
+
+    if(draped) applySplatPose(bustT, jolt);
+
+    // Jemné zatřesení kamerou při zásahu.
+    if(bustCamBase){
+      camera.position.copy(bustCamBase);
+      const shaking = (bustT>BUST_RUN_DUR && bustT<BUST_RUN_DUR+BUST_HIT_DUR) || (draped && bustT<0.4);
+      if(shaking){
+        camera.position.x += (Math.random()-0.5)*camShake;
+        camera.position.y += (Math.random()-0.5)*camShake;
+      }
+      camShake = Math.max(0, camShake-dt*2);
+    }
+
+    renderer.render(scene, camera);
+
+    if(bustT >= BUST_TOTAL){
+      busting = false;
+      hitFlash.style.opacity = '0';
+      // Při splatu necháme punkáče viset přes auto i za obrazovkou GAME OVER;
+      // pózy se srovnají až při restartu.
+      if(!draped){
+        playerGroup.rotation.set(0,0,0);
+        playerGroup.position.y = 0;
+        torso.rotation.x = 0.2; headGrp.rotation.x = -0.17;
+        arms.forEach(A=>{ A.sh.rotation.x = 0; A.el.rotation.x = 0; });
+      }
+      endGame();
+    }
+  }
+
+  // --- ULOUZNUTÍ NA LOUŽI: punkáč mu podjedou nohy, zamává rukama a spadne
+  // naplocho na záda. Otáčíme celou postavu kolem chodidel (ta zůstávají na
+  // místě), takže tělo dopadne přesně na zem bez ručního dopočítávání výšky.
+  let slipping = false, slipT = 0;
+  const SLIP_FALL_DUR = 0.5, SLIP_HOLD_DUR = 1.1;
+  const SLIP_TOTAL = SLIP_FALL_DUR + SLIP_HOLD_DUR;
+
+  function startSlip(){
+    if(slipping) return;
+    slipping = true; slipT = 0;
+    chaseActive = false;
+    bustType = 'puddle'; // pro hlášku v endGame()
+  }
+
+  function updateSlip(dt){
+    slipT += dt;
+    const tt = Math.min(slipT/SLIP_FALL_DUR, 1);
+    const ease = tt*tt; // zrychlující pád, jako gravitace
+
+    // Celé tělo se překlápí dozadu kolem chodidel - dopadne přesně na zem.
+    playerGroup.rotation.x = ease*(Math.PI/2);
+
+    // Nohy vylétnou dopředu, jako by mu ujely (mírněji než dřív).
+    legs.forEach((L,i)=>{
+      L.hip.rotation.x = -0.25 - ease*0.65 + (i===0?0.1:-0.06);
+      L.knee.rotation.x = 0.2 + ease*0.55;
+      L.ankle.rotation.x = -0.15*ease;
+    });
+    // Ruce zamávají ve vzduchu, jak se snaží udržet rovnováhu.
+    arms.forEach((A,i)=>{
+      A.sh.rotation.x = -0.6 - ease*0.5 + Math.sin(slipT*20+i*3)*0.18*ease;
+      A.sh.rotation.z = A.side*(0.2+0.2*ease);
+      A.el.rotation.x = -0.4 - ease*0.45;
+    });
+    torso.rotation.x = -0.12*ease;
+    headGrp.rotation.x = 0.18*ease;
+    headGrp.rotation.y = Math.sin(slipT*10)*0.15*ease;
+
+    if(tt>=1){
+      // Leží na zádech - nohy se krátce po dopadu trochu uvolní.
+      const ht = Math.min((slipT-SLIP_FALL_DUR)/0.3, 1);
+      legs.forEach(L=>{ L.knee.rotation.x = 0.75 - ht*0.25; L.hip.rotation.x = -0.9 + ht*0.2; });
+      arms.forEach(A=>{ A.sh.rotation.x = -1.0 + ht*0.25; });
+    }
+
+    if(slipT >= SLIP_TOTAL){
+      slipping = false;
+      playerGroup.rotation.set(0,0,0);
+      return true; // signál pro loop(), že animace skončila a má naskočit GAME OVER
+    }
+    return false;
+  }
+
+  function reset(){
+    moveSpeed = 30;
+    dist = 0; score = 0; coinScore = 0; bottleScore = 0;
+    spawnCursorZ = -40; lastSegmentId = null; phase = 0; T = 0;
+    currentLane = 1; targetX = 0; jumping=false; jumpT=0;
+    obstacles.forEach(o=>scene.remove(o.mesh));
+    coins.forEach(c=>scene.remove(c.mesh));
+    bottles.forEach(b=>scene.remove(b.mesh));
+    obstacles = []; coins = []; bottles = [];
+    ensureSegmentsAhead(); // rovnou naplní první kus trati segmenty
+    playerGroup.position.set(0,0,0);
+    // Honička policistou se resetuje - první objevení přijde po náhodné pauze.
+    chaseActive = false; chaseT = 0; chaseTimer = 6 + Math.random()*6;
+    busting = false; bustT = 0; bustHitFired = false; camShake = 0;
+    splat.active = false; bustZ = 0;
+    slipping = false; slipT = 0;
+    if(bustObstacle){ scene.remove(bustObstacle); bustObstacle = null; }
+    hitFlash.style.opacity = '0';
+    playerGroup.rotation.set(0,0,0);
+    if(copGroup) copGroup.visible = false;
+  }
+
+  // --- ZVUK: cinknutí mince (Web Audio API, žádné externí soubory) ---
+  // Prohlížeče povolí zvuk až po "platném" gestu uživatele - a mousedown/
+  // touchstart mezi ně (na rozdíl od click/touchend/keydown) spolehlivě
+  // NEPATŘÍ. Proto se úplně první pokus o resume() na mousedown/touchstart
+  // často tiše nezdaří; teprve navazující click/touchend ho podrží. Proto je
+  // unlockAudio() navěšený na víc událostí a navíc volaný i přímo z
+  // requestStart(), aby se odemčení jistě stihlo v gestu, které se počítá.
+  let audioCtx = null;
+  function unlockAudio(){
+    try{
+      if(!audioCtx){
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if(!AC) return;
+        audioCtx = new AC();
+      }
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+    }catch(e){}
+  }
+  ['touchstart','touchend','mousedown','click','keydown'].forEach(ev=>{
+    window.addEventListener(ev, unlockAudio, {passive:true});
+  });
+
+  // Cinknutí = dva rychlé vysoké tóny za sebou (jako klasická herní mince).
+  // Výšku tónů (baseFreq) lze měnit; náhodná odchylka ±3 % dělá zvuk živější.
+  function playCoinSound(){
+    if(!audioCtx || audioCtx.state !== 'running') return;
+    const now = audioCtx.currentTime;
+    const baseFreq = 1318 * (0.97 + Math.random()*0.06); // ~E6
+    [[baseFreq, 0], [baseFreq*1.5, 0.07]].forEach(([freq, delay])=>{
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + delay);
+      gain.gain.setValueAtTime(0.0001, now + delay);
+      gain.gain.exponentialRampToValueAtTime(0.22, now + delay + 0.008); // rychlý nástup
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 0.28); // doznění
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(now + delay);
+      osc.stop(now + delay + 0.3);
+    });
+  }
+
+  // "Písk-píííísk": krátké pípnutí, malá pauza, a pak ten dlouhý tón s vibratem
+  // (viz níže) - napodobuje typické dvojité fouknutí do policejní píšťalky.
+  function playWhistleSound(){
+    if(!audioCtx || audioCtx.state !== 'running') return;
+    const now = audioCtx.currentTime;
+    const baseFreq = 1300;
+
+    // Krátké "písk" - stejná výška, jen bez vibrata a hodně krátké.
+    const shortOsc = audioCtx.createOscillator();
+    shortOsc.type = 'triangle';
+    shortOsc.frequency.setValueAtTime(baseFreq, now);
+    const shortGain = audioCtx.createGain();
+    shortGain.gain.setValueAtTime(0.0001, now);
+    shortGain.gain.exponentialRampToValueAtTime(0.2, now+0.02);
+    shortGain.gain.exponentialRampToValueAtTime(0.0001, now+0.12);
+    shortOsc.connect(shortGain); shortGain.connect(audioCtx.destination);
+    shortOsc.start(now); shortOsc.stop(now+0.13);
+
+    // Dlouhé "píííísk" - nastupuje s malou pauzou po tom krátkém.
+    const longStart = now + 0.19;
+    const dur = 0.9;
+    const carrier = audioCtx.createOscillator();
+    carrier.type = 'triangle';
+    carrier.frequency.setValueAtTime(baseFreq, longStart);
+
+    const lfo = audioCtx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(22, longStart); // rychlost "kolotání" kuličky
+    const lfoGain = audioCtx.createGain();
+    lfoGain.gain.setValueAtTime(55, longStart); // hloubka vibrata v Hz
+    lfo.connect(lfoGain); lfoGain.connect(carrier.frequency);
+
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0.0001, longStart);
+    gain.gain.exponentialRampToValueAtTime(0.22, longStart+0.06);
+    gain.gain.setValueAtTime(0.22, longStart+dur-0.18);
+    gain.gain.exponentialRampToValueAtTime(0.0001, longStart+dur);
+
+    carrier.connect(gain); gain.connect(audioCtx.destination);
+    lfo.start(longStart); carrier.start(longStart);
+    lfo.stop(longStart+dur); carrier.stop(longStart+dur);
+  }
+
+  // Ambientní "šum" proudu při čůrání na úvodní obrazovce - filtrovaný šum
+  // (bandpass), jehož hlasitost se každý snímek napojuje na flowFade
+  // (viz introLoop), takže zeslábne přesně s tím, jak proud mizí.
+  let peeNoiseSource = null, peeNoiseGain = null;
+  function startPeeSound(){
+    if(!audioCtx || peeNoiseSource) return;
+    const bufferSize = audioCtx.sampleRate*2;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for(let i=0;i<bufferSize;i++) data[i] = Math.random()*2-1;
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buffer; noise.loop = true;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass'; filter.frequency.value = 1100; filter.Q.value = 0.6;
+    const gain = audioCtx.createGain(); gain.gain.value = 0;
+    noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+    noise.start();
+    peeNoiseSource = noise; peeNoiseGain = gain;
+  }
+  function setPeeVolume(v){
+    if(!peeNoiseGain || !audioCtx) return;
+    peeNoiseGain.gain.setTargetAtTime(v, audioCtx.currentTime, 0.05);
+  }
+  function stopPeeSound(){
+    if(!peeNoiseSource) return;
+    const src = peeNoiseSource, g = peeNoiseGain;
+    peeNoiseSource = null; peeNoiseGain = null;
+    try{ g.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1); }catch(e){}
+    setTimeout(()=>{ try{ src.stop(); }catch(e){} }, 300);
+  }
+
+  function changeLane(dir){
+    currentLane = Math.max(0, Math.min(2, currentLane+dir));
+    targetX = laneX[currentLane];
+  }
+  function doJump(){ if(!jumping){ jumping=true; jumpT=0; } }
+
+  window.addEventListener('keydown', e=>{
+    if(!running) return;
+    if(e.key==='ArrowLeft') changeLane(-1);
+    else if(e.key==='ArrowRight') changeLane(1);
+    else if(e.key==='ArrowUp' || e.key===' ') doJump();
+  });
+  let touchStartX=0, touchStartY=0, touchActive=false;
+  canvas.addEventListener('touchstart', e=>{ const t=e.touches[0]; touchStartX=t.clientX; touchStartY=t.clientY; touchActive=true; }, {passive:true});
+  canvas.addEventListener('touchend', e=>{
+    if(!touchActive) return; touchActive=false;
+    const t=e.changedTouches[0];
+    const dx=t.clientX-touchStartX, dy=t.clientY-touchStartY;
+    if(Math.abs(dx)>Math.abs(dy) && Math.abs(dx)>30) changeLane(dx>0?1:-1);
+    else if(dy<-30) doJump();
+    else if(!running) requestStart();
+  }, {passive:true});
+  canvas.addEventListener('click', ()=>{ if(!running) requestStart(); });
+  window.addEventListener('resize', resize);
+
+  function requestStart(){
+    unlockAudio(); // jistota odemčení uvnitř tohoto gesta (viz komentář u unlockAudio)
+    if(introActive) beginStop();
+    else if(!running) playRestartSwoop();
+  }
+
+  // --- RESTART: kamera vzlétne vysoko nahoru (kde není vidět, že se scéna
+  // mění), tam se potichu vymění zbytky z minulé hry za čerstvou úvodní scénu
+  // (auto + čůrání), a kamera se pak plynule vrátí dolů - podobně jako
+  // přepínání postav v GTA V. Následně se úvodní scéna sama (bez klikání)
+  // přehraje až do doběhnutí policisty a startu hry.
+  let swoopPhase = null, swoopT0, swoopStartCam, swoopStartLook, deferredCar = null;
+  const SWOOP_UP_DUR = 0.4, SWOOP_DOWN_DUR = 0.55;
+  const SWOOP_PEAK_POS = new THREE.Vector3(0, 42, 6);
+  const SWOOP_PEAK_LOOK = new THREE.Vector3(0, 0, -25);
+
+  function playRestartSwoop(){
+    if(swoopPhase) return;
+    overlay.classList.add('hidden');
+    // Auto, přes které visel punkáč, a jeho pozu necháme na scéně, dokud
+    // kamera nevyletí nahoru (tam se vše potichu vymění).
+    deferredCar = bustObstacle; bustObstacle = null;
+    const keepPos = playerGroup.position.clone();
+    reset(); // uklidí zbylá auta/mince/lahve z minulé hry a vynuluje skóre
+    playerGroup.position.copy(keepPos);
+    swoopPhase = 'up'; swoopT0 = undefined;
+    requestAnimationFrame(swoopLoop);
+  }
+
+  function swoopLoop(t){
+    if(swoopT0===undefined){
+      swoopT0 = t;
+      swoopStartCam = camera.position.clone();
+      swoopStartLook = GAME_LOOKAT.clone();
+    }
+    const time = (t-swoopT0)/1000;
+
+    if(swoopPhase==='up'){
+      const tt = Math.min(time/SWOOP_UP_DUR, 1);
+      const ease = tt*tt;
+      camera.position.lerpVectors(swoopStartCam, SWOOP_PEAK_POS, ease);
+      camera.lookAt(new THREE.Vector3().lerpVectors(swoopStartLook, SWOOP_PEAK_LOOK, ease));
+      renderer.render(scene, camera);
+      if(tt>=1){
+        // Nahoře je scéna daleko mimo záběr - potichu ji vyměníme za úvodní.
+        stopPeeSound();
+        if(introCar){ scene.remove(introCar); introCar = null; }
+        if(peeStream){ scene.remove(peeStream); peeStream = null; }
+        if(splashCircle){ scene.remove(splashCircle); splashCircle = null; }
+        drips.forEach(d=>scene.remove(d)); drips = [];
+        if(puddle){ scene.remove(puddle); puddle = null; }
+        if(deferredCar){ scene.remove(deferredCar); deferredCar = null; }
+        playerGroup.rotation.set(0,0,0);
+        playerGroup.position.set(0,0,0);
+        copGroup.visible = false;
+        stopping = false; stopT = 0;
+        introActive = true;
+        autoAdvance = true;
+        buildIntroScene(false);
+        swoopPhase = 'down'; swoopT0 = t;
+      }
+      requestAnimationFrame(swoopLoop);
+      return;
+    }
+
+    // swoopPhase === 'down'
+    const tt2 = Math.min(time/SWOOP_DOWN_DUR, 1);
+    const ease2 = 1-Math.pow(1-tt2,3);
+    camera.position.lerpVectors(SWOOP_PEAK_POS, INTRO_CAM_POS, ease2);
+    camera.lookAt(new THREE.Vector3().lerpVectors(SWOOP_PEAK_LOOK, INTRO_LOOKAT, ease2));
+    renderer.render(scene, camera);
+    if(tt2>=1){
+      camera.position.copy(INTRO_CAM_POS);
+      camera.lookAt(INTRO_LOOKAT);
+      swoopPhase = null;
+      requestAnimationFrame(introLoop);
+      return;
+    }
+    requestAnimationFrame(swoopLoop);
+  }
+
+  function finishStart(){
+    // Konec úvodní scény: zastavíme introLoop, uklidíme auto/proud/stříkanec.
+    // Postava už je otočená plynule z beginStop/introLoop, kamera se do herní
+    // pozice přesune plynule v loop() (viz camBlendActive) - žádný skok.
+    introActive = false;
+    autoAdvance = false;
+    stopPeeSound();
+    if(introCar){ scene.remove(introCar); introCar = null; }
+    if(peeStream){ scene.remove(peeStream); peeStream = null; }
+    if(splashCircle){ scene.remove(splashCircle); splashCircle = null; }
+    drips.forEach(d=>scene.remove(d)); drips = [];
+    if(puddle){ scene.remove(puddle); puddle = null; }
+    if(copGroup){ copGroup.visible = false; }
+    playerGroup.rotation.y = 0;
+    camBlendT = 0; camBlendActive = true;
+
+    reset();
+    coinsEl.textContent='0'; scoreEl.textContent='0'; bottlesEl.textContent='0';
+    running = true;
+    overlay.classList.add('hidden');
+    lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+  startBtn.addEventListener('click', requestStart);
+
+  async function ulozSkore(total) {
+    const jmeno = prompt("Zadej svoje jméno:");
+    if (!jmeno) return;
+
+    const { error } = await db
+        .from("scores")
+        .insert([
+            {
+                player_name: jmeno,
+                score: total,
+                game: "pee-runner"
+            }
+        ]);
+
+    if (error) {
+        console.error("Chyba při ukládání skóre:", error);
+    }
+  }
+
+  async function endGame(){
+    running = false;
+    const total = score;
+
+    // Uložení aktuálního skóre na server.
+    await ulozSkore(total);
+
+    // Lokální best můžeme dál aktualizovat i bez připojení.
+    if(total > best){
+        best = total;
+        try{ localStorage.setItem('punkRunnerBest3D', String(best)); }catch(e){}
+    }
+    bestEl.textContent = best;
+
+    // Načtení TOP 3 z žebříčku.
+    const { data, error } = await db
+        .from("scores")
+        .select("player_name, score")
+        .eq("game", "pee-runner")
+        .order("score", { ascending: false })
+        .limit(3);
+
+    let top3 = "";
+    if(!error && data){
+        data.forEach((hrac, index) => {
+            top3 += `${index + 1}. ${hrac.player_name} — ${hrac.score}<br>`;
+        });
+    }
+
+    msg.innerHTML =
+        `<strong>Tvoje skóre: ${total}</strong>
+        <br><br>
+        <strong>🏆 TOP 3</strong>
+        <br>
+        ${top3}`;
+
+    startBtn.textContent = 'HRÁT ZNOVU';
+    overlay.classList.remove('hidden');
+  }
+
+  let lastT=0;
+  function loop(t_now){
+    if(!running) return;
+    const dt = Math.min((t_now-lastT)/1000, 0.05);
+    lastT = t_now;
+
+    if(busting){
+      updateBust(dt);
+      if(running) requestAnimationFrame(loop);
+      return;
+    }
+
+    T += dt;
+
+    moveSpeed += dt*0.06;
+    if(moveSpeed>15) moveSpeed=15;
+    dist += moveSpeed*dt;
+
+    playerGroup.position.x += (targetX - playerGroup.position.x) * Math.min(dt*10,1);
+
+    if(camBlendActive){
+      camBlendT += dt/CAM_BLEND_DURATION;
+      const tt = Math.min(camBlendT,1);
+      const ease = tt<0.5 ? 2*tt*tt : 1-Math.pow(-2*tt+2,2)/2; // easeInOutQuad
+      camera.position.lerpVectors(INTRO_CAM_POS, GAME_CAM_POS, ease);
+      const look = new THREE.Vector3().lerpVectors(INTRO_LOOKAT, GAME_LOOKAT, ease);
+      camera.lookAt(look);
+      if(tt>=1) camBlendActive = false;
+    }
+    
+    // --- RADY3 ANIMATION INTEGRATION ---
+    phase += dt * moveSpeed * 0.55;
+    if(slipping){
+      // Svět kolem (silnice, budovy, provoz) běží dál normálně -
+      // nahrazujeme jen animaci hráče, ne celou hru.
+      if(updateSlip(dt)){ endGame(); return; }
+    } else {
+      applyPose();
+    }
+    // -----------------------------------
+
+    // Občasná honička policistou - objeví se těsně za hráčem, doběhne stejným
+    // tempem a po chvíli zase odpadne do dálky/zmizí, v náhodných intervalech.
+    if(!slipping){
+      chaseTimer -= dt;
+      if(!chaseActive && chaseTimer<=0){
+        chaseActive = true; chaseT = 0;
+        copGroup.visible = true;
+        copGroup.rotation.y = Math.PI; // běží stejným směrem jako hráč (pryč od kamery)
+        copGroup.position.set(playerGroup.position.x, 0, 3.0);
+        copPhase = phase; // navázaný na stejný běžecký cyklus jako hráč
+        playWhistleSound();
+      }
+      if(chaseActive){
+        chaseT += dt;
+        copPhase += dt*moveSpeed*0.55;
+        applyCopPose(copPhase);
+        copGroup.position.x += (playerGroup.position.x - copGroup.position.x)*Math.min(dt*6,1);
+        copGroup.position.z = 3.0 + Math.sin(chaseT*2)*0.15;
+        if(chaseT>=CHASE_DURATION){
+          chaseActive = false;
+          copGroup.visible = false;
+          chaseTimer = 10 + Math.random()*12;
+        }
+      }
+    }
+
+    let jumpH = 0;
+    if(!slipping){
+      if(jumping){
+        jumpT += dt;
+        const dur=0.62;
+        jumpH = Math.sin(Math.min(jumpT/dur,1)*Math.PI)*1.5;
+        if(jumpT>=dur){ jumping=false; jumpT=0; }
+      }
+      playerGroup.position.y = jumpH;
+    }
+
+    dashes.forEach(d=>{
+      d.mesh.position.z += moveSpeed*dt;
+      if(d.mesh.position.z > 9){ d.mesh.position.z -= 56; }
+    });
+    buildings.forEach(b=>{
+      b.position.z += moveSpeed*dt*0.6; // o něco pomaleji = paralaxa v pozadí
+      if(b.position.z > 15){ b.position.z -= 150; }
+    });
+
+    // Segmenty trati - fronta se musí posouvat spolu se světem (stejně
+    // jako pozice překážek), jinak si ensureSegmentsAhead() bude myslet,
+    // že má napořád dost napřipraveno, a přestane generovat další.
+    spawnCursorZ += moveSpeed*dt;
+    ensureSegmentsAhead();
+
+    // --- PCR1 LIGHTS FLASHING ---
+    const on=((performance.now()/1000)*3)%1<.5;
+    M.beaconL.emissiveIntensity=on?2.8:.2;
+    M.beaconR.emissiveIntensity=on?.2:2.8;
+
+    for(const o of obstacles){
+      o.mesh.position.z += moveSpeed*dt;
+      // Kolize: každý typ má vlastní šířku okna (o.zHalf) - dřív louže sdílela
+      // stejnou širokou zónu jako dlouhé auto, takže "trefila" hráče i těsně
+      // za sebou, i když už tam vizuálně nebyla.
+      if(!slipping && !o.resolved && o.lane===currentLane && o.mesh.position.z > -o.zHalf && o.mesh.position.z < o.zHalf && jumpH < o.jumpReq){
+        if(o.isPuddle){
+          // Louže zůstává v poli překážek a jede dál se světem úplně normálně
+          // (jako by byla součástí silnice) - jen ji označíme, ať znovu
+          // nespustí kolizi. Zmizí, až normálně projede za kameru.
+          o.resolved = true;
+          startSlip();
+        } else {
+          // Auto hned odklidíme ze scény, ať v něm punkáč vizuálně nezůstane "zaseknutý".
+          obstacles = obstacles.filter(x=>x!==o);
+          startBust('car', o.mesh);
+        }
+        requestAnimationFrame(loop);
+        return;
+      }
+    }
+    obstacles = obstacles.filter(o=>{
+      if(o.mesh.position.z > 9){ scene.remove(o.mesh); return false; }
+      return true;
+    });
+
+    for(const c of coins){
+      if(c.collected) continue;
+      c.mesh.position.z += moveSpeed*dt;
+      c.mesh.rotation.z += dt*4;
+      if(c.lane===currentLane && Math.abs(c.mesh.position.z) < 0.9){
+        c.collected = true;
+        scene.remove(c.mesh);
+        coinScore++;
+        playCoinSound();
+        score = coinScore + bottleScore*5;
+        coinsEl.textContent = coinScore;
+        scoreEl.textContent = score;
+      }
+    }
+    coins = coins.filter(c=>{
+      if(c.collected) return false;
+      if(c.mesh.position.z > 9){ scene.remove(c.mesh); return false; }
+      return true;
+    });
+
+    for(const b of bottles){
+      if(b.collected) continue;
+      b.mesh.position.z += moveSpeed*dt;
+      b.mesh.rotation.y += dt*3;
+      if(b.lane===currentLane && Math.abs(b.mesh.position.z) < 0.9){
+        b.collected = true;
+        scene.remove(b.mesh);
+        bottleScore++;
+        score = coinScore + bottleScore*5;
+        bottlesEl.textContent = bottleScore;
+        scoreEl.textContent = score;
+      }
+    }
+    bottles = bottles.filter(b=>{
+      if(b.collected) return false;
+      if(b.mesh.position.z > 9){ scene.remove(b.mesh); return false; }
+      return true;
+    });
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(loop);
+  }
+
+  initThree();
+  obstacles = []; coins = []; bottles = [];
+  currentLane = 1; targetX = 0; jumping=false; jumpT=0;
+  loadExternalSegments(); // zkusí segments/segment_0001.js, 0002.js, ...
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>
