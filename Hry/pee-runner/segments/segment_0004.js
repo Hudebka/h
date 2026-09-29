@@ -11,7 +11,17 @@
     name: "",
     length: 24,
     items: [
-      { type:"coin", lane:1, z:0 },\n      { type:"coin", lane:1, z:4 },\n      { type:"bottle", lane:0, z:8 },\n      { type:"coin", lane:1, z:8 },\n      { type:"bottle", lane:2, z:8 },\n      { type:"puddle", lane:0, z:12 },\n      { type:"coin", lane:1, z:12 },\n      { type:"puddle", lane:2, z:12 },\n      { type:"coin", lane:1, z:16 },\n      { type:"coin", lane:1, z:20 },\n      { type:"coin", lane:1, z:24 },
+      { type:"coin", lane:1, z:0 },
+      { type:"coin", lane:1, z:4 },
+      { type:"bottle", lane:0, z:8 },
+      { type:"coin", lane:1, z:8 },
+      { type:"bottle", lane:2, z:8 },
+      { type:"puddle", lane:0, z:12 },
+      { type:"coin", lane:1, z:12 },
+      { type:"puddle", lane:2, z:12 },
+      { type:"coin", lane:1, z:16 },
+      { type:"coin", lane:1, z:20 },
+      { type:"coin", lane:1, z:24 }
     ]
   });
 })();
