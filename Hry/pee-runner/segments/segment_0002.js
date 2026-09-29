@@ -3,7 +3,7 @@
 // do složky segments/ vedle hry - nic dalšího upravovat netřeba.
 (function(){
   if(!window.PunkRunner || typeof window.PunkRunner.registerSegment !== 'function'){
-    console.warn('PunkRunner registr nenalezen - segment_0001.js se nenačetl.');
+    console.warn('PunkRunner registr nenalezen - segment_0002.js se nenačetl.');
     return;
   }
   window.PunkRunner.registerSegment({
@@ -41,7 +41,7 @@
       { type:"car", lane:0, z:44 },
       { type:"car", lane:2, z:44 },
       { type:"car", lane:0, z:48 },
-      { type:"car", lane:2, z:48 },
+      { type:"car", lane:2, z:48 }
     ]
   });
 })();
