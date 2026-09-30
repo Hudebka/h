@@ -1,0 +1,1814 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Auta 3D – policejní / civil</title>
+<style>
+  html, body { height: 100%; margin: 0; overflow: hidden; background: #0f1220; touch-action: none; user-select: none; -webkit-user-select: none; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #ui { position: fixed; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; gap: 14px;
+        padding: 40px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+        background: linear-gradient(to top, rgba(15,18,32,.92), rgba(15,18,32,0)); pointer-events: none; }
+  #ui > * { pointer-events: auto; }
+  .row { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; max-width: 420px; }
+  .arrow { width: 56px; height: 56px; border-radius: 50%; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.08);
+           color: #fff; font-size: 30px; line-height: 1; cursor: pointer; touch-action: manipulation; }
+  .arrow:active { background: rgba(255,255,255,.22); }
+  #name { flex: 1; text-align: center; color: #fff; font-size: 20px; font-weight: 600; letter-spacing: .3px; }
+  #count { display: block; margin-top: 4px; font-size: 12px; font-weight: 400; color: rgba(255,255,255,.5); }
+  .seg { display: flex; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+  .seg button { border: 0; background: transparent; color: rgba(255,255,255,.7); font-size: 16px; font-weight: 600; padding: 10px 22px;
+                border-radius: 999px; cursor: pointer; touch-action: manipulation; display: flex; align-items: center; gap: 8px; }
+  .seg button:disabled { opacity: .35; cursor: default; }
+  .seg button.on { background: #1668c8; color: #fff; }
+  .seg button#bCivil.on { background: #3a4058; }
+  #colors { display: none; gap: 16px; }
+  .sw { width: 38px; height: 38px; border-radius: 50%; border: 3px solid rgba(255,255,255,.25); cursor: pointer; padding: 0; touch-action: manipulation; }
+  .sw.on { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.25); }
+  #dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,.8); }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div class="row">
+    <button class="arrow" id="prev" aria-label="Předchozí model">&#8249;</button>
+    <div id="name"><span id="nm">Sedan</span><span id="count">1 / 4</span></div>
+    <button class="arrow" id="next" aria-label="Další model">&#8250;</button>
+  </div>
+  <div id="colors"></div>
+  <div class="seg">
+    <button id="bPolice" class="on">Policejní</button>
+    <button id="bCivil">Civil<span id="dot"></span></button>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+  let scene, camera, renderer, car;
+  let isDragging = false;
+  let previousMousePosition = { x: 0, y: 0 };
+  let targetRotationY = 0, targetRotationX = 0;
+  let rotationVelocityY = 0, rotationVelocityX = 0;
+  const REG = {};
+
+  // Náhodná barva civilních aut (při každém načtení jiná než minule)
+  const PALETTE = [0xc0161b, 0xf2c200, 0x1c4fbd, 0x1f8a3b]; // červená, žlutá, modrá, zelená
+  const BODY_COLOR = (() => {
+    let last = -1, i;
+    try { last = parseInt(localStorage.getItem('carColor'), 10); } catch (e) {}
+    do { i = Math.floor(Math.random() * PALETTE.length); } while (i === last);
+    try { localStorage.setItem('carColor', String(i)); } catch (e) {}
+    return PALETTE[i];
+  })();
+  const BODY_MAT = new THREE.MeshStandardMaterial({ color: BODY_COLOR, roughness: .28, metalness: .35 });
+
+  REG['sedan_police'] = (function () {
+  // --- POLICEJNÍ COMBI ---
+  const std = (c, r, m, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, o));
+  const M = {
+    white: std(0xd8dde1, .28, .35),
+    dark: std(0x14181d, .5, .15),
+    black: std(0x08090a, .7, 0),
+    glass: std(0x0d1822, .08, .35),
+    chrome: std(0xc4cbcf, .18, .9),
+    red: std(0xc0161b, .25, .15, { emissive: 0x400000 }),
+    lamp: std(0xffffff, .08, .1, { emissive: 0x7fbfff, emissiveIntensity: .5 }),
+    beaconL: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    beaconR: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    rim: std(0xc9ced2, .3, .7)
+  };
+  const BLUE = '#0a4bbd', YEL = '#ffd81a', INK = '#0a3f9e';
+  const BL = '#1668c8', LM = '#d6f21c', AX = [-1.46, 1.226];
+
+  function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    o.position.set(x, y, z); o.rotation.set(rx, ry, rz); return o;
+  }
+  function tex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'));
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w, h, t, lit = true) {
+    const Mat = lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new Mat({ map: t, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  }
+  function spaced(x, str, cx, cy, sp) {
+    const ws = [...str].map(ch => x.measureText(ch).width);
+    let px = cx - (ws.reduce((a, b) => a + b, 0) + sp * (str.length - 1)) / 2;
+    [...str].forEach((ch, i) => { x.fillText(ch, px, cy); px += ws[i] + sp; });
+  }
+  function bodyProfile() {
+    const s = new THREE.Shape();
+    s.moveTo(-2.28, .24);
+    [[-2.33, .42], [-2.31, .70], [-2.20, .80], [-1.05, .93], [1.30, .99], [2.05, 1.01], [2.29, .98], [2.33, .62], [2.27, .26]]
+      .forEach(p => s.lineTo(p[0], p[1]));
+    return s;
+  }
+  function wheel(x, z) {
+    const w = new THREE.Group(), s = Math.sign(z);
+    const cyl = (r, h, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); o.rotation.x = Math.PI / 2; return o; };
+    w.add(cyl(.33, .21, M.black), cyl(.235, .215, M.rim), cyl(.05, .23, M.chrome));
+    for (let a = 0; a < 5; a++) w.add(box(.022, .46, .008, M.dark, 0, 0, s * .109, 0, 0, a * Math.PI / 5 + .3));
+    w.position.set(x, .33, z);
+    return w;
+  }
+
+  function createPoliceCarTemplate() {
+    const g = new THREE.Group(), add = (...o) => o.forEach(m => g.add(m));
+
+    const bg = new THREE.ExtrudeGeometry(bodyProfile(), { depth: 1.75, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .045, bevelThickness: .035 });
+    bg.translate(0, 0, -.875);
+    add(new THREE.Mesh(bg, M.white));
+    add(box(4.4, .2, 1.5, M.black, -.05, .17, 0), box(1.8, .08, 1.84, M.black, -.1, .30, 0));
+
+    // COMBI: nástavba se táhne téměř až k zadní hraně, záď je skoro svislá
+    const gs = new THREE.Shape();
+    gs.moveTo(-.95, .93); gs.lineTo(-.10, 1.42); gs.lineTo(.95, 1.45); gs.lineTo(1.65, 1.02);
+    const gg = new THREE.ExtrudeGeometry(gs, { depth: 1.56, bevelEnabled: false });
+    gg.translate(0, 0, -.78);
+    add(new THREE.Mesh(gg, M.glass), box(1.10, .05, 1.58, M.white, .42, 1.44, 0));
+    for (const z of [-.79, .79]) {
+      add(box(.06, .98, .07, M.black, -.525, 1.18, z, 0, 0, -1.06),
+          box(.08, .50, .07, M.black, .12, 1.18, z),
+          box(.16, .82, .07, M.white, 1.30, 1.235, z, 0, 0, 1.02));
+    }
+    for (const z of [-1.0, 1.0]) add(box(.13, .09, .17, M.white, -.78, .99, z), box(.05, .04, .09, M.black, -.80, .96, z * .93));
+
+    const PX = 400;
+    const mk = flip => tex(1720, 312, x => {
+      const X = v => (flip ? 2.15 - v : v + 2.15) * PX, Y = v => (1.02 - v) * PX;
+      const poly = (c, p) => { x.fillStyle = c; x.beginPath(); p.forEach((q, i) => x[i ? 'lineTo' : 'moveTo'](X(q[0]), Y(q[1]))); x.closePath(); x.fill(); };
+      x.fillStyle = '#06080a';
+      AX.forEach(a => { x.beginPath(); x.arc(X(a), Y(.33), .41 * PX, 0, 7); x.fill(); });
+      poly(BL, [[-.98, .925], [2.10, .925], [2.10, .805], [-.98, .805]]);
+      [-1.55, -1.44, -1.33, -1.22, -1.11].forEach((v, i) => poly(i % 2 ? BL : LM, [[v, .85], [v + .10, .85], [v + .10, .76], [v, .76]]));
+      const stripe = (b, c) => poly(c, [[b, .26], [b + .07, .26], [b + .27, .80], [b + .20, .80]]);
+      [[-1.02, BL], [-.95, LM], [-.88, BL], [.45, BL], [.52, LM], [.59, BL]].forEach(s => stripe(s[0], s[1]));
+      x.strokeStyle = 'rgba(0,0,0,.4)'; x.lineWidth = 3;
+      [-.85, .12, 1.02].forEach(v => { x.beginPath(); x.moveTo(X(v), Y(.80)); x.lineTo(X(v), Y(.30)); x.stroke(); });
+      x.fillStyle = '#aab0b5';
+      [-.12, .86].forEach(v => x.fillRect(X(flip ? v + .14 : v), Y(.775), .14 * PX, .035 * PX));
+      x.textBaseline = 'middle'; x.textAlign = 'left';
+      x.fillStyle = '#fff'; x.font = 'bold 28px Arial'; spaced(x, 'POMÁHAT A CHRÁNIT', X(-.38), Y(.865), 2);
+      x.font = 'bold 36px Arial'; x.fillText('158', X(1.93) - 30, Y(.865));
+      x.strokeStyle = '#fff'; x.lineWidth = 4; x.beginPath(); x.arc(X(1.78), Y(.865), 17, 0, 7); x.stroke();
+      x.fillStyle = '#111'; x.font = 'bold 52px Arial'; spaced(x, 'POLICIE', X(-.30), Y(.56), 6);
+    });
+    const sR = decal(4.3, .78, mk(false)); sR.position.set(0, .63, .9115);
+    const sL = decal(4.3, .78, mk(true)); sL.position.set(0, .63, -.9115); sL.rotation.y = Math.PI;
+    add(sR, sL);
+
+    add(box(.06, .10, 1.30, M.black, -2.35, .36, 0));
+    add(box(.05, .24, .64, M.black, -2.36, .60, 0));
+    for (let i = -3; i <= 3; i++) add(box(.055, .20, .015, M.chrome, -2.375, .60, i * .085));
+    add(box(.05, .03, .70, M.chrome, -2.35, .72, 0));
+    for (const z of [-.66, .66]) {
+      const ry = z > 0 ? -.30 : .30;
+      add(box(.06, .11, .50, M.lamp, -2.285, .75, z, 0, ry, 0));
+      add(box(.03, .025, .30, z < 0 ? M.beaconL : M.beaconR, -2.318, .70, z, 0, ry, 0));
+      add(box(.04, .06, .18, M.lamp, -2.385, .36, z * .93));
+    }
+    const pt = tex(256, 56, x => {
+      x.fillStyle = '#f3f3ee'; x.fillRect(0, 0, 256, 56);
+      x.fillStyle = '#1747a8'; x.fillRect(0, 0, 26, 56);
+      x.fillStyle = '#fff'; x.font = 'bold 14px Arial'; x.textAlign = 'center'; x.fillText('CZ', 13, 50);
+      x.fillStyle = '#111'; x.font = 'bold 40px Arial'; x.textBaseline = 'middle'; x.fillText('1A1 0158', 148, 30);
+    });
+    const pF = decal(.52, .114, pt, false); pF.position.set(-2.39, .40, 0); pF.rotation.y = -Math.PI / 2;
+    const pB = decal(.52, .114, pt, false); pB.position.set(2.375, .42, 0); pB.rotation.y = Math.PI / 2;
+    add(pF, pB);
+
+    // Zadní světla: dole na nárazníku + svislá po stranách výklopných dveří
+    for (const z of [-.62, .62]) add(box(.05, .12, .42, M.red, 2.365, .88, z));
+    add(box(.04, .26, 1.66, M.dark, 2.35, .40, 0));
+    const rt = tex(350, 110, x => {
+      x.font = 'bold 52px Arial'; x.textBaseline = 'middle'; x.textAlign = 'left'; x.fillStyle = '#111';
+      spaced(x, 'POLICIE', 175, 55, 5);
+    });
+    const rd = decal(.70, .22, rt); rd.position.set(2.37, .72, 0); rd.rotation.y = Math.PI / 2; add(rd);
+
+    const ht = tex(512, 256, x => {
+      x.strokeStyle = '#5a6066'; x.lineWidth = 5; x.beginPath(); x.arc(256, 66, 40, 0, 7); x.stroke();
+      x.lineWidth = 3;
+      for (let a = 0; a < 8; a++) { x.beginPath(); x.moveTo(256, 66); x.lineTo(256 + 34 * Math.cos(a * Math.PI / 4), 66 + 34 * Math.sin(a * Math.PI / 4)); x.stroke(); }
+      x.font = 'bold 84px Arial'; x.textBaseline = 'middle'; x.textAlign = 'left'; x.fillStyle = '#2a2e33';
+      spaced(x, 'POLICIE', 256, 190, 8);
+    });
+    const hood = new THREE.Group();
+    const hm = decal(.95, .475, ht); hm.rotation.x = -Math.PI / 2; hm.rotation.z = -Math.PI / 2;
+    hood.add(hm); hood.position.set(-1.62, .915, 0); hood.rotation.z = .113; add(hood);
+
+    AX.forEach(x => [-.85, .85].forEach(z => add(wheel(x, z))));
+
+    const bar = new THREE.Group();
+    bar.add(box(.30, .06, 1.22, M.rim),
+      box(.26, .09, .44, M.beaconL, 0, .075, -.36),
+      box(.26, .09, .44, M.beaconR, 0, .075, .36),
+      box(.26, .08, .28, M.lamp, 0, .07, 0));
+    bar.position.set(.30, 1.495, 0);
+    add(bar);
+
+    add(box(.02, .34, .02, M.black, .85, 1.635, -.5, 0, 0, -.10));
+
+    g.position.y = .02;
+    g.scale.set(0.90, 0.90, 0.90);
+    return g;
+  }
+
+
+  return createPoliceCarTemplate;
+  })();
+
+  REG['combi_police'] = (function () {
+  // --- POLICEJNÍ COMBI ---
+  const std = (c, r, m, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, o));
+  const M = {
+    white: std(0xd8dde1, .28, .35),
+    dark: std(0x14181d, .5, .15),
+    black: std(0x08090a, .7, 0),
+    glass: std(0x0d1822, .08, .35),
+    chrome: std(0xc4cbcf, .18, .9),
+    red: std(0xc0161b, .25, .15, { emissive: 0x400000 }),
+    lamp: std(0xffffff, .08, .1, { emissive: 0x7fbfff, emissiveIntensity: .5 }),
+    beaconL: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    beaconR: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    rim: std(0xc9ced2, .3, .7)
+  };
+  const BLUE = '#0a4bbd', YEL = '#ffd81a', INK = '#0a3f9e';
+  const BL = '#1668c8', LM = '#d6f21c', AX = [-1.46, 1.226];
+
+  function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    o.position.set(x, y, z); o.rotation.set(rx, ry, rz); return o;
+  }
+  function tex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'));
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w, h, t, lit = true) {
+    const Mat = lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new Mat({ map: t, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  }
+  function spaced(x, str, cx, cy, sp) {
+    const ws = [...str].map(ch => x.measureText(ch).width);
+    let px = cx - (ws.reduce((a, b) => a + b, 0) + sp * (str.length - 1)) / 2;
+    [...str].forEach((ch, i) => { x.fillText(ch, px, cy); px += ws[i] + sp; });
+  }
+  function bodyProfile() {
+    const s = new THREE.Shape();
+    s.moveTo(-2.28, .24);
+    [[-2.33, .42], [-2.31, .70], [-2.20, .80], [-1.05, .93], [1.30, .99], [2.05, 1.01], [2.29, 1.0], [2.33, .62], [2.27, .26]]
+      .forEach(p => s.lineTo(p[0], p[1]));
+    return s;
+  }
+  function wheel(x, z) {
+    const w = new THREE.Group(), s = Math.sign(z);
+    const cyl = (r, h, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); o.rotation.x = Math.PI / 2; return o; };
+    w.add(cyl(.33, .21, M.black), cyl(.235, .215, M.rim), cyl(.05, .23, M.chrome));
+    for (let a = 0; a < 5; a++) w.add(box(.022, .46, .008, M.dark, 0, 0, s * .109, 0, 0, a * Math.PI / 5 + .3));
+    w.position.set(x, .33, z);
+    return w;
+  }
+
+  function createPoliceCarTemplate() {
+    const g = new THREE.Group(), add = (...o) => o.forEach(m => g.add(m));
+
+    const bg = new THREE.ExtrudeGeometry(bodyProfile(), { depth: 1.75, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .045, bevelThickness: .035 });
+    bg.translate(0, 0, -.875);
+    add(new THREE.Mesh(bg, M.white));
+    add(box(4.4, .2, 1.5, M.black, -.05, .17, 0), box(1.8, .08, 1.84, M.black, -.1, .30, 0));
+
+    // COMBI: nástavba se táhne téměř až k zadní hraně, záď je skoro svislá
+    const gs = new THREE.Shape();
+    gs.moveTo(-.95, .93); gs.lineTo(-.10, 1.42); gs.lineTo(2.12, 1.45); gs.lineTo(2.27, .99);
+    const gg = new THREE.ExtrudeGeometry(gs, { depth: 1.56, bevelEnabled: false });
+    gg.translate(0, 0, -.78);
+    add(new THREE.Mesh(gg, M.glass), box(2.30, .05, 1.58, M.white, 1.03, 1.44, 0));
+    for (const z of [-.79, .79]) {
+      add(box(.06, .98, .07, M.black, -.525, 1.18, z, 0, 0, -1.06),   // A sloupek
+          box(.08, .50, .07, M.black, .12, 1.18, z),                   // B sloupek
+          box(.10, .50, .07, M.white, 1.42, 1.19, z),                  // C sloupek
+          box(.10, .50, .07, M.white, 2.195, 1.22, z, 0, 0, .31));     // D sloupek (klopená záď)
+      add(box(2.05, .03, .04, M.chrome, 1.0, 1.485, z * .88));         // střešní ližiny
+    }
+    for (const z of [-1.0, 1.0]) add(box(.13, .09, .17, M.white, -.78, .99, z), box(.05, .04, .09, M.black, -.80, .96, z * .93));
+
+    const PX = 400;
+    const mk = flip => tex(1720, 312, x => {
+      const X = v => (flip ? 2.15 - v : v + 2.15) * PX, Y = v => (1.02 - v) * PX;
+      const poly = (c, p) => { x.fillStyle = c; x.beginPath(); p.forEach((q, i) => x[i ? 'lineTo' : 'moveTo'](X(q[0]), Y(q[1]))); x.closePath(); x.fill(); };
+      x.fillStyle = '#06080a';
+      AX.forEach(a => { x.beginPath(); x.arc(X(a), Y(.33), .41 * PX, 0, 7); x.fill(); });
+      poly(BL, [[-.98, .925], [2.10, .925], [2.10, .805], [-.98, .805]]);
+      [-1.55, -1.44, -1.33, -1.22, -1.11].forEach((v, i) => poly(i % 2 ? BL : LM, [[v, .85], [v + .10, .85], [v + .10, .76], [v, .76]]));
+      const stripe = (b, c) => poly(c, [[b, .26], [b + .07, .26], [b + .27, .80], [b + .20, .80]]);
+      [[-1.02, BL], [-.95, LM], [-.88, BL], [.45, BL], [.52, LM], [.59, BL]].forEach(s => stripe(s[0], s[1]));
+      x.strokeStyle = 'rgba(0,0,0,.4)'; x.lineWidth = 3;
+      [-.85, .12, 1.02].forEach(v => { x.beginPath(); x.moveTo(X(v), Y(.80)); x.lineTo(X(v), Y(.30)); x.stroke(); });
+      x.fillStyle = '#aab0b5';
+      [-.12, .86].forEach(v => x.fillRect(X(flip ? v + .14 : v), Y(.775), .14 * PX, .035 * PX));
+      x.textBaseline = 'middle'; x.textAlign = 'left';
+      x.fillStyle = '#fff'; x.font = 'bold 28px Arial'; spaced(x, 'POMÁHAT A CHRÁNIT', X(-.38), Y(.865), 2);
+      x.font = 'bold 36px Arial'; x.fillText('158', X(1.93) - 30, Y(.865));
+      x.strokeStyle = '#fff'; x.lineWidth = 4; x.beginPath(); x.arc(X(1.78), Y(.865), 17, 0, 7); x.stroke();
+      x.fillStyle = '#111'; x.font = 'bold 52px Arial'; spaced(x, 'POLICIE', X(-.30), Y(.56), 6);
+    });
+    const sR = decal(4.3, .78, mk(false)); sR.position.set(0, .63, .9115);
+    const sL = decal(4.3, .78, mk(true)); sL.position.set(0, .63, -.9115); sL.rotation.y = Math.PI;
+    add(sR, sL);
+
+    add(box(.06, .10, 1.30, M.black, -2.35, .36, 0));
+    add(box(.05, .24, .64, M.black, -2.36, .60, 0));
+    for (let i = -3; i <= 3; i++) add(box(.055, .20, .015, M.chrome, -2.375, .60, i * .085));
+    add(box(.05, .03, .70, M.chrome, -2.35, .72, 0));
+    for (const z of [-.66, .66]) {
+      const ry = z > 0 ? -.30 : .30;
+      add(box(.06, .11, .50, M.lamp, -2.285, .75, z, 0, ry, 0));
+      add(box(.03, .025, .30, z < 0 ? M.beaconL : M.beaconR, -2.318, .70, z, 0, ry, 0));
+      add(box(.04, .06, .18, M.lamp, -2.385, .36, z * .93));
+    }
+    const pt = tex(256, 56, x => {
+      x.fillStyle = '#f3f3ee'; x.fillRect(0, 0, 256, 56);
+      x.fillStyle = '#1747a8'; x.fillRect(0, 0, 26, 56);
+      x.fillStyle = '#fff'; x.font = 'bold 14px Arial'; x.textAlign = 'center'; x.fillText('CZ', 13, 50);
+      x.fillStyle = '#111'; x.font = 'bold 40px Arial'; x.textBaseline = 'middle'; x.fillText('1A1 0158', 148, 30);
+    });
+    const pF = decal(.52, .114, pt, false); pF.position.set(-2.39, .40, 0); pF.rotation.y = -Math.PI / 2;
+    const pB = decal(.52, .114, pt, false); pB.position.set(2.375, .42, 0); pB.rotation.y = Math.PI / 2;
+    add(pF, pB);
+
+    // Zadní světla: dole na nárazníku + svislá po stranách výklopných dveří
+    for (const z of [-.62, .62]) add(box(.05, .12, .42, M.red, 2.365, .88, z));
+    for (const z of [-.80, .80]) add(box(.09, .40, .12, M.red, 2.30, 1.10, z, 0, 0, .10));
+    add(box(.04, .26, 1.66, M.dark, 2.35, .40, 0));
+    add(box(.03, .03, 1.56, M.black, 2.30, 1.03, 0));                  // spára výklopných dveří
+    const rt = tex(350, 110, x => {
+      x.font = 'bold 52px Arial'; x.textBaseline = 'middle'; x.textAlign = 'left'; x.fillStyle = '#111';
+      spaced(x, 'POLICIE', 175, 55, 5);
+    });
+    const rd = decal(.70, .22, rt); rd.position.set(2.37, .72, 0); rd.rotation.y = Math.PI / 2; add(rd);
+
+    const ht = tex(512, 256, x => {
+      x.strokeStyle = '#5a6066'; x.lineWidth = 5; x.beginPath(); x.arc(256, 66, 40, 0, 7); x.stroke();
+      x.lineWidth = 3;
+      for (let a = 0; a < 8; a++) { x.beginPath(); x.moveTo(256, 66); x.lineTo(256 + 34 * Math.cos(a * Math.PI / 4), 66 + 34 * Math.sin(a * Math.PI / 4)); x.stroke(); }
+      x.font = 'bold 84px Arial'; x.textBaseline = 'middle'; x.textAlign = 'left'; x.fillStyle = '#2a2e33';
+      spaced(x, 'POLICIE', 256, 190, 8);
+    });
+    const hood = new THREE.Group();
+    const hm = decal(.95, .475, ht); hm.rotation.x = -Math.PI / 2; hm.rotation.z = -Math.PI / 2;
+    hood.add(hm); hood.position.set(-1.62, .915, 0); hood.rotation.z = .113; add(hood);
+
+    AX.forEach(x => [-.85, .85].forEach(z => add(wheel(x, z))));
+
+    const bar = new THREE.Group();
+    bar.add(box(.30, .06, 1.22, M.rim),
+      box(.26, .09, .44, M.beaconL, 0, .075, -.36),
+      box(.26, .09, .44, M.beaconR, 0, .075, .36),
+      box(.26, .08, .28, M.lamp, 0, .07, 0));
+    bar.position.set(.50, 1.495, 0);
+    add(bar);
+
+    add(box(.02, .34, .02, M.black, 1.75, 1.635, -.5, 0, 0, -.10));
+
+    g.position.y = .02;
+    g.scale.set(0.90, 0.90, 0.90);
+    return g;
+  }
+
+
+  return createPoliceCarTemplate;
+  })();
+
+  REG['van_police'] = (function () {
+  // --- POLICEJNÍ DODÁVKA ---
+  const std = (c, r, m, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, o));
+  const M = {
+    white: std(0xd8dde1, .28, .35),
+    dark: std(0x14181d, .5, .15),
+    black: std(0x08090a, .7, 0),
+    glass: std(0x0d1822, .08, .35),
+    chrome: std(0xc4cbcf, .18, .9),
+    red: std(0xc0161b, .25, .15, { emissive: 0x400000 }),
+    lamp: std(0xffffff, .08, .1, { emissive: 0x7fbfff, emissiveIntensity: .5 }),
+    beaconL: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    beaconR: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    rim: std(0xc9ced2, .3, .7)
+  };
+  const BL = '#1668c8', LM = '#d6f21c', AX = [-1.5, 1.55];
+  const ROOF = 2.12, W = 1.9;
+
+  function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    o.position.set(x, y, z); o.rotation.set(rx, ry, rz); return o;
+  }
+  function tex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'));
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w, h, t, lit = true) {
+    const Mat = lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new Mat({ map: t, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  }
+  function spaced(x, str, cx, cy, sp) {
+    const ws = [...str].map(ch => x.measureText(ch).width);
+    let px = cx - (ws.reduce((a, b) => a + b, 0) + sp * (str.length - 1)) / 2;
+    [...str].forEach((ch, i) => { x.fillText(ch, px, cy); px += ws[i] + sp; });
+  }
+  function bodyProfile() {
+    const s = new THREE.Shape();
+    s.moveTo(-2.28, .24);
+    [[-2.34, .45], [-2.32, .90], [-2.10, 1.05], [-1.52, ROOF], [2.28, ROOF], [2.35, 1.95], [2.35, .60], [2.28, .26]]
+      .forEach(p => s.lineTo(p[0], p[1]));
+    return s;
+  }
+  function wheel(x, z) {
+    const w = new THREE.Group(), s = Math.sign(z);
+    const cyl = (r, h, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); o.rotation.x = Math.PI / 2; return o; };
+    w.add(cyl(.33, .21, M.black), cyl(.235, .215, M.rim), cyl(.05, .23, M.chrome));
+    for (let a = 0; a < 5; a++) w.add(box(.022, .46, .008, M.dark, 0, 0, s * .109, 0, 0, a * Math.PI / 5 + .3));
+    w.scale.set(1.1, 1.1, 1);
+    w.position.set(x, .36, z);
+    return w;
+  }
+
+  function createPoliceVan() {
+    const g = new THREE.Group(), add = (...o) => o.forEach(m => g.add(m));
+
+    const bg = new THREE.ExtrudeGeometry(bodyProfile(), { depth: W, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .045, bevelThickness: .035 });
+    bg.translate(0, 0, -W / 2);
+    add(new THREE.Mesh(bg, M.white));
+    add(box(4.6, .2, 1.6, M.black, 0, .2, 0));
+
+    // Čelní sklo (šikmé) + rámeček
+    add(box(.03, .92, 1.80, M.black, -1.864, 1.595, 0, 0, 0, -.514),
+        box(.03, .78, 1.64, M.glass, -1.878, 1.603, 0, 0, 0, -.514));
+
+    // Boční okna kabiny a malá okna v nástavbě
+    const Z = .99;
+    for (const z of [-Z, Z]) {
+      add(box(1.05, .68, .02, M.black, -.95, 1.68, z), box(.95, .60, .03, M.glass, -.95, 1.68, z * 1.003));
+      add(box(.68, .43, .02, M.black, 1.3, 1.75, z), box(.60, .35, .03, M.glass, 1.3, 1.75, z * 1.003));
+      add(box(.10, .28, .08, M.dark, -1.55, 1.50, z * 1.09), box(.05, .04, .12, M.black, -1.55, 1.42, z * 1.03));
+    }
+
+    // Boční polepy
+    const PX = 300;
+    const mk = flip => tex(1440, 570, x => {
+      const X = v => (flip ? 2.4 - v : v + 2.4) * PX, Y = v => (ROOF - v) * PX;
+      const poly = (c, p) => { x.fillStyle = c; x.beginPath(); p.forEach((q, i) => x[i ? 'lineTo' : 'moveTo'](X(q[0]), Y(q[1]))); x.closePath(); x.fill(); };
+      x.fillStyle = '#06080a';
+      AX.forEach(a => { x.beginPath(); x.arc(X(a), Y(.36), .44 * PX, 0, 7); x.fill(); });
+      poly(BL, [[-1.30, 1.34], [2.30, 1.34], [2.30, 1.20], [-1.30, 1.20]]);
+      [-1.85, -1.74, -1.63, -1.52, -1.41].forEach((v, i) => poly(i % 2 ? BL : LM, [[v, 1.36], [v + .10, 1.36], [v + .10, 1.18], [v, 1.18]]));
+      const stripe = (b, c) => poly(c, [[b, .26], [b + .07, .26], [b + .27, 1.14], [b + .20, 1.14]]);
+      [[-1.35, BL], [-1.28, LM], [-1.21, BL], [1.55, BL], [1.62, LM], [1.69, BL]].forEach(s => stripe(s[0], s[1]));
+      x.strokeStyle = 'rgba(0,0,0,.4)'; x.lineWidth = 3;
+      [-.35, 1.65].forEach(v => { x.beginPath(); x.moveTo(X(v), Y(2.0)); x.lineTo(X(v), Y(.30)); x.stroke(); });
+      x.fillStyle = '#aab0b5';
+      [-.30, 1.55].forEach(v => x.fillRect(X(flip ? v + .14 : v), Y(1.10), .14 * PX, .035 * PX));
+      x.textBaseline = 'middle';
+      x.textAlign = 'center';
+      x.fillStyle = '#fff'; x.font = 'bold 24px Arial'; spaced(x, 'POMÁHAT A CHRÁNIT', X(.75), Y(1.27), 2);
+      x.font = 'bold 32px Arial'; x.fillText('158', X(2.04), Y(1.27));
+      x.strokeStyle = '#fff'; x.lineWidth = 4; x.beginPath(); x.arc(X(1.88), Y(1.27), 15, 0, 7); x.stroke();
+      x.textAlign = 'left';
+      x.fillStyle = '#111'; x.font = 'bold 96px Arial'; spaced(x, 'POLICIE', X(.55), Y(.80), 10);
+    });
+    const sR = decal(4.8, W, mk(false)); sR.position.set(0, ROOF - W / 2, .9865);
+    const sL = decal(4.8, W, mk(true)); sL.position.set(0, ROOF - W / 2, -.9865); sL.rotation.y = Math.PI;
+    add(sR, sL);
+
+    // Předek: nárazník, maska, světlomety
+    add(box(.10, .14, 1.90, M.dark, -2.40, .33, 0));
+    add(box(.05, .26, .90, M.black, -2.385, .70, 0));
+    for (let i = 0; i < 4; i++) add(box(.06, .02, .86, M.chrome, -2.39, .62 + i * .05, 0));
+    for (const z of [-.72, .72]) {
+      add(box(.06, .14, .42, M.lamp, -2.36, .84, z));
+      add(box(.03, .03, .34, z < 0 ? M.beaconL : M.beaconR, -2.385, .73, z));
+    }
+    const pt = tex(256, 56, x => {
+      x.fillStyle = '#f3f3ee'; x.fillRect(0, 0, 256, 56);
+      x.fillStyle = '#1747a8'; x.fillRect(0, 0, 26, 56);
+      x.fillStyle = '#fff'; x.font = 'bold 14px Arial'; x.textAlign = 'center'; x.fillText('CZ', 13, 50);
+      x.fillStyle = '#111'; x.font = 'bold 40px Arial'; x.textBaseline = 'middle'; x.fillText('1A1 0158', 148, 30);
+    });
+    const pF = decal(.52, .114, pt, false); pF.position.set(-2.455, .45, 0); pF.rotation.y = -Math.PI / 2;
+    const pB = decal(.52, .114, pt, false); pB.position.set(2.435, .60, 0); pB.rotation.y = Math.PI / 2;
+    add(pF, pB);
+
+    // Záď: dvoukřídlé dveře, okna, světla, nárazník
+    add(box(.10, .20, 1.90, M.dark, 2.42, .34, 0));
+    add(box(.03, 1.50, .03, M.black, 2.385, 1.20, 0));
+    for (const z of [-.42, .42]) add(box(.03, .46, .70, M.black, 2.385, 1.58, z), box(.03, .38, .62, M.glass, 2.395, 1.58, z));
+    for (const z of [-.86, .86]) add(box(.06, .55, .12, M.red, 2.37, .95, z));
+    const rt = tex(350, 110, x => {
+      x.font = 'bold 52px Arial'; x.textBaseline = 'middle'; x.textAlign = 'left'; x.fillStyle = '#111';
+      spaced(x, 'POLICIE', 175, 55, 5);
+    });
+    const rd = decal(.80, .25, rt); rd.position.set(2.39, .98, 0); rd.rotation.y = Math.PI / 2; add(rd);
+
+    // Kola
+    AX.forEach(x => [-.93, .93].forEach(z => add(wheel(x, z))));
+
+    // Střecha: maják, průduch, anténa
+    const bar = new THREE.Group();
+    bar.add(box(.30, .06, 1.22, M.rim),
+      box(.26, .09, .44, M.beaconL, 0, .075, -.36),
+      box(.26, .09, .44, M.beaconR, 0, .075, .36),
+      box(.26, .08, .28, M.lamp, 0, .07, 0));
+    bar.position.set(-.75, ROOF + .065, 0);
+    add(bar);
+    add(box(.70, .10, .50, M.white, 1.0, ROOF + .085, .3));
+    add(box(.02, .34, .02, M.black, 1.9, ROOF + .20, -.5, 0, 0, -.10));
+
+    g.position.y = -.35;
+    g.scale.set(0.90, 0.90, 0.90);
+    return g;
+  }
+
+
+  return createPoliceVan;
+  })();
+
+  REG['truck_police'] = (function () {
+  // --- POLICEJNÍ KAMION S NÁVĚSEM ---
+  const std = (c, r, m, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, o));
+  const M = {
+    white: std(0xd8dde1, .28, .35),
+    dark: std(0x14181d, .5, .15),
+    black: std(0x08090a, .7, 0),
+    glass: std(0x0d1822, .08, .35),
+    chrome: std(0xc4cbcf, .18, .9),
+    red: std(0xc0161b, .25, .15, { emissive: 0x400000 }),
+    lime: std(0xd6f21c, .4, .1),
+    lamp: std(0xffffff, .08, .1, { emissive: 0x7fbfff, emissiveIntensity: .5 }),
+    beaconL: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    beaconR: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    rim: std(0xc9ced2, .3, .7)
+  };
+  const BL = '#1668c8', LM = '#d6f21c';
+
+  function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    o.position.set(x, y, z); o.rotation.set(rx, ry, rz); return o;
+  }
+  function cylV(r, h, mat, x, y, z) {
+    const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 16), mat);
+    o.position.set(x, y, z); return o;
+  }
+  function tex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'));
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w, h, t, lit = true) {
+    const Mat = lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new Mat({ map: t, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  }
+  function spaced(x, str, cx, cy, sp) {
+    const ws = [...str].map(ch => x.measureText(ch).width);
+    let px = cx - (ws.reduce((a, b) => a + b, 0) + sp * (str.length - 1)) / 2;
+    [...str].forEach((ch, i) => { x.fillText(ch, px, cy); px += ws[i] + sp; });
+  }
+  function wheel(x, z) {
+    const w = new THREE.Group(), s = Math.sign(z);
+    const cyl = (r, h, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); o.rotation.x = Math.PI / 2; return o; };
+    w.add(cyl(.33, .21, M.black), cyl(.235, .215, M.rim), cyl(.05, .23, M.chrome));
+    for (let a = 0; a < 5; a++) w.add(box(.022, .46, .008, M.dark, 0, 0, s * .109, 0, 0, a * Math.PI / 5 + .3));
+    w.scale.set(1.5, 1.5, 1);
+    w.position.set(x, .5, z);
+    return w;
+  }
+  function cabProfile() {
+    const s = new THREE.Shape();
+    s.moveTo(-5.95, .80);
+    [[-6.02, 1.0], [-6.02, 2.15], [-5.75, 3.30], [-4.0, 3.32], [-3.90, 3.25], [-3.90, .80]]
+      .forEach(p => s.lineTo(p[0], p[1]));
+    return s;
+  }
+  const plate = () => tex(256, 56, x => {
+    x.fillStyle = '#f3f3ee'; x.fillRect(0, 0, 256, 56);
+    x.fillStyle = '#1747a8'; x.fillRect(0, 0, 26, 56);
+    x.fillStyle = '#fff'; x.font = 'bold 14px Arial'; x.textAlign = 'center'; x.fillText('CZ', 13, 50);
+    x.fillStyle = '#111'; x.font = 'bold 40px Arial'; x.textBaseline = 'middle'; x.fillText('1A1 0158', 148, 30);
+  });
+  const word = (size, sp, col = '#111') => tex(700, 220, x => {
+    x.font = 'bold ' + size + 'px Arial'; x.textBaseline = 'middle'; x.textAlign = 'left'; x.fillStyle = col;
+    spaced(x, 'POLICIE', 350, 110, sp);
+  });
+
+  function createPoliceTruck() {
+    const g = new THREE.Group(), add = (...o) => o.forEach(m => g.add(m));
+
+    // ===== Tahač =====
+    const bg = new THREE.ExtrudeGeometry(cabProfile(), { depth: 1.95, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .045, bevelThickness: .035 });
+    bg.translate(0, 0, -.975);
+    add(new THREE.Mesh(bg, M.white));
+    add(box(5.0, .30, 1.2, M.black, -3.6, .75, 0));            // rám
+    add(box(.9, .08, 1.3, M.dark, -2.2, .94, 0));              // točnice
+    add(box(.5, .5, 1.75, M.white, -4.20, 3.55, 0, 0, 0, .25)); // spoiler
+
+    // čelní sklo (šikmé)
+    add(box(.03, .92, 1.70, M.black, -5.948, 2.737, 0, 0, 0, -.23),
+        box(.03, .78, 1.56, M.glass, -5.958, 2.742, 0, 0, 0, -.23));
+
+    // boční okna, zpětná zrcátka, výfuky
+    for (const z of [-1, 1]) {
+      add(box(.95, .74, .02, M.black, -5.30, 2.62, z * 1.012), box(.88, .66, .03, M.glass, -5.30, 2.62, z * 1.017));
+      add(box(.08, .55, .14, M.dark, -5.85, 2.55, z * 1.25), box(.05, .05, .30, M.black, -5.85, 2.40, z * 1.10));
+      add(cylV(.06, 3.0, M.chrome, -3.75, 2.4, z * 1.10));
+    }
+
+    // předek
+    add(box(.20, .30, 2.0, M.dark, -6.10, .75, 0));
+    add(box(.05, .50, 1.0, M.black, -6.055, 1.50, 0));
+    for (let i = 0; i < 4; i++) add(box(.06, .02, .96, M.chrome, -6.06, 1.32 + i * .11, 0));
+    for (const z of [-.75, .75]) {
+      add(box(.06, .22, .45, M.lamp, -6.04, 1.45, z));
+      add(box(.03, .03, .38, z < 0 ? M.beaconL : M.beaconR, -6.07, 1.25, z));
+    }
+    const pF = decal(.52, .114, plate(), false); pF.position.set(-6.075, 1.0, 0); pF.rotation.y = -Math.PI / 2; add(pF);
+    const fw = decal(1.4, .44, word(84, 8)); fw.position.set(-6.078, 1.98, 0); fw.rotation.y = -Math.PI / 2; add(fw);
+
+    // boční polepy kabiny
+    const PXc = 250;
+    const mkc = flip => tex(575, 700, x => {
+      const X = v => (flip ? -3.825 - v : v + 6.125) * PXc, Y = v => (3.375 - v) * PXc;
+      const poly = (c, p) => { x.fillStyle = c; x.beginPath(); p.forEach((q, i) => x[i ? 'lineTo' : 'moveTo'](X(q[0]), Y(q[1]))); x.closePath(); x.fill(); };
+      x.fillStyle = '#06080a';
+      x.beginPath(); x.arc(X(-5.2), Y(.52), .60 * PXc, 0, 7); x.fill();
+      poly(BL, [[-6.0, 1.95], [-3.9, 1.95], [-3.9, 1.80], [-6.0, 1.80]]);
+      poly(LM, [[-6.0, 1.78], [-3.9, 1.78], [-3.9, 1.74], [-6.0, 1.74]]);
+      [[-4.35, BL], [-4.28, LM], [-4.21, BL]].forEach(s => poly(s[1], [[s[0], .85], [s[0] + .07, .85], [s[0] + .22, 1.70], [s[0] + .15, 1.70]]));
+      x.strokeStyle = 'rgba(0,0,0,.4)'; x.lineWidth = 3;
+      [-5.95, -4.70].forEach(v => { x.beginPath(); x.moveTo(X(v), Y(2.30)); x.lineTo(X(v), Y(.95)); x.stroke(); });
+      x.fillStyle = '#aab0b5';
+      x.fillRect(X(flip ? -4.85 + .12 : -4.85), Y(1.95) + 2, .12 * PXc, .035 * PXc);
+      x.textBaseline = 'middle'; x.textAlign = 'left';
+      x.fillStyle = '#111'; x.font = 'bold 30px Arial'; spaced(x, 'POLICIE', X(-5.32), Y(1.38), 4);
+    });
+    const cR = decal(2.3, 2.8, mkc(false)); cR.position.set(-4.975, 1.975, 1.0115);
+    const cL = decal(2.3, 2.8, mkc(true)); cL.position.set(-4.975, 1.975, -1.0115); cL.rotation.y = Math.PI;
+    add(cR, cL);
+
+    // maják na kabině
+    const bar = new THREE.Group();
+    bar.add(box(.30, .06, 1.22, M.rim),
+      box(.26, .09, .44, M.beaconL, 0, .075, -.36),
+      box(.26, .09, .44, M.beaconR, 0, .075, .36),
+      box(.26, .08, .28, M.lamp, 0, .07, 0));
+    bar.position.set(-5.05, 3.39, 0);
+    add(bar);
+    add(box(.02, .34, .02, M.black, -4.6, 3.54, -.5, 0, 0, -.10));
+
+    // ===== Návěs (větší) =====
+    add(box(10, 2.9, 2.1, M.white, 1.8, 2.50, 0));
+    add(box(10, .18, 2.05, M.black, 1.8, 1.04, 0));
+    add(box(9.4, .15, 1.4, M.dark, 2.0, .88, 0));
+    for (const z of [-.7, .7]) add(box(.10, .8, .10, M.dark, -2.4, .55, z));   // opěrné nohy
+    add(box(.9, .12, 1.2, M.dark, -2.8, .96, 0));                              // královský čep
+    add(box(9.8, .06, 2.12, M.black, 1.8, 3.95, 0));                           // střešní lem
+
+    const PX = 200;
+    const mkt = flip => tex(2000, 580, x => {
+      const X = v => (flip ? 6.8 - v : v + 3.2) * PX, Y = v => (3.95 - v) * PX;
+      const poly = (c, p) => { x.fillStyle = c; x.beginPath(); p.forEach((q, i) => x[i ? 'lineTo' : 'moveTo'](X(q[0]), Y(q[1]))); x.closePath(); x.fill(); };
+      poly(BL, [[-3.2, 1.85], [6.8, 1.85], [6.8, 1.35], [-3.2, 1.35]]);
+      poly(LM, [[-3.2, 1.93], [6.8, 1.93], [6.8, 1.88], [-3.2, 1.88]]);
+      const stripe = (b, c) => poly(c, [[b, 1.97], [b + .09, 1.97], [b + .75, 3.90], [b + .66, 3.90]]);
+      [[5.35, BL], [5.44, LM], [5.53, BL], [-2.95, BL], [-2.86, LM], [-2.77, BL]].forEach(s => stripe(s[0], s[1]));
+      x.textBaseline = 'middle'; x.textAlign = 'left';
+      x.fillStyle = '#fff'; x.font = 'bold 60px Arial'; spaced(x, 'POMÁHAT A CHRÁNIT', X(1.4), Y(1.60), 8);
+      x.textAlign = 'center';
+      x.font = 'bold 68px Arial'; x.fillText('158', X(4.40), Y(1.60));
+      x.strokeStyle = '#fff'; x.lineWidth = 6; x.beginPath(); x.arc(X(4.02), Y(1.60), 32, 0, 7); x.stroke();
+      x.textAlign = 'left';
+      x.fillStyle = '#111'; x.font = 'bold 260px Arial'; spaced(x, 'POLICIE', X(1.65), Y(3.0), 16);
+    });
+    const tR = decal(10, 2.9, mkt(false)); tR.position.set(1.8, 2.50, 1.052);
+    const tL = decal(10, 2.9, mkt(true)); tL.position.set(1.8, 2.50, -1.052); tL.rotation.y = Math.PI;
+    add(tR, tL);
+
+    // záď návěsu
+    add(box(.10, .16, 1.95, M.dark, 6.82, .72, 0));
+    for (const z of [-.85, .85]) add(box(.08, .30, .08, M.dark, 6.78, .84, z));
+    add(box(.03, 2.8, .03, M.black, 6.81, 2.50, 0));
+    for (const y of [1.5, 3.5]) for (const z of [-.9, .9]) add(box(.04, .08, .10, M.black, 6.81, y, z));
+    for (const z of [-.95, .95]) add(box(.06, .50, .12, M.red, 6.83, 1.30, z));
+    add(box(.02, .10, 2.05, M.red, 6.81, 1.62, 0));
+    add(box(.02, .08, 2.05, M.lime, 6.81, 1.50, 0));
+    const pB = decal(.52, .114, plate(), false); pB.position.set(6.84, 1.05, 0); pB.rotation.y = Math.PI / 2; add(pB);
+    const rw = decal(1.8, .57, word(96, 8)); rw.position.set(6.82, 3.0, 0); rw.rotation.y = Math.PI / 2; add(rw);
+
+    // ===== Kola =====
+    [-5.2].forEach(x => [-.96, .96].forEach(z => add(wheel(x, z))));
+    [-2.7, -1.6, 5.4, 6.3].forEach(x => [-.95, -.67, .67, .95].forEach(z => add(wheel(x, z))));
+    for (const x of [-5.2, -2.7, -1.6, 5.4, 6.3]) add(box(.08, .08, 1.8, M.dark, x, .5, 0));
+    for (const x of [-1.1, 6.75]) for (const z of [-.95, .95]) add(box(.03, .4, .5, M.black, x, .70, z));
+
+    const w = new THREE.Group();
+    g.position.set(-.4, -2.0, 0);
+    w.add(g);
+    w.scale.set(0.46, 0.46, 0.46);
+    return w;
+  }
+
+
+  return createPoliceTruck;
+  })();
+
+  REG['sedan_civil'] = (function () {
+  // --- POLICEJNÍ COMBI ---
+  const BODY = BODY_COLOR;
+
+  const std = (c, r, m, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, o));
+  const M = {
+    white: BODY_MAT,
+    dark: std(0x14181d, .5, .15),
+    black: std(0x08090a, .7, 0),
+    glass: std(0x0d1822, .08, .35),
+    chrome: std(0xc4cbcf, .18, .9),
+    red: std(0xc0161b, .25, .15, { emissive: 0x400000 }),
+    lamp: std(0xffffff, .08, .1, { emissive: 0x7fbfff, emissiveIntensity: .5 }),
+    beaconL: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    beaconR: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    rim: std(0xc9ced2, .3, .7)
+  };
+  const BLUE = '#0a4bbd', YEL = '#ffd81a', INK = '#0a3f9e';
+  const BL = '#1668c8', LM = '#d6f21c', AX = [-1.46, 1.226];
+
+  function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    o.position.set(x, y, z); o.rotation.set(rx, ry, rz); return o;
+  }
+  function tex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'));
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w, h, t, lit = true) {
+    const Mat = lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new Mat({ map: t, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  }
+  function spaced(x, str, cx, cy, sp) {
+    const ws = [...str].map(ch => x.measureText(ch).width);
+    let px = cx - (ws.reduce((a, b) => a + b, 0) + sp * (str.length - 1)) / 2;
+    [...str].forEach((ch, i) => { x.fillText(ch, px, cy); px += ws[i] + sp; });
+  }
+  function bodyProfile() {
+    const s = new THREE.Shape();
+    s.moveTo(-2.28, .24);
+    [[-2.33, .42], [-2.31, .70], [-2.20, .80], [-1.05, .93], [1.30, .99], [2.05, 1.01], [2.29, .98], [2.33, .62], [2.27, .26]]
+      .forEach(p => s.lineTo(p[0], p[1]));
+    return s;
+  }
+  function wheel(x, z) {
+    const w = new THREE.Group(), s = Math.sign(z);
+    const cyl = (r, h, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); o.rotation.x = Math.PI / 2; return o; };
+    w.add(cyl(.33, .21, M.black), cyl(.235, .215, M.rim), cyl(.05, .23, M.chrome));
+    for (let a = 0; a < 5; a++) w.add(box(.022, .46, .008, M.dark, 0, 0, s * .109, 0, 0, a * Math.PI / 5 + .3));
+    w.position.set(x, .33, z);
+    return w;
+  }
+
+  function createPoliceCarTemplate() {
+    const g = new THREE.Group(), add = (...o) => o.forEach(m => g.add(m));
+
+    const bg = new THREE.ExtrudeGeometry(bodyProfile(), { depth: 1.75, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .045, bevelThickness: .035 });
+    bg.translate(0, 0, -.875);
+    add(new THREE.Mesh(bg, M.white));
+    add(box(4.4, .2, 1.5, M.black, -.05, .17, 0), box(1.8, .08, 1.84, M.black, -.1, .30, 0));
+
+    // COMBI: nástavba se táhne téměř až k zadní hraně, záď je skoro svislá
+    const gs = new THREE.Shape();
+    gs.moveTo(-.95, .93); gs.lineTo(-.10, 1.42); gs.lineTo(.95, 1.45); gs.lineTo(1.65, 1.02);
+    const gg = new THREE.ExtrudeGeometry(gs, { depth: 1.56, bevelEnabled: false });
+    gg.translate(0, 0, -.78);
+    add(new THREE.Mesh(gg, M.glass), box(1.10, .05, 1.58, M.white, .42, 1.44, 0));
+    for (const z of [-.79, .79]) {
+      add(box(.06, .98, .07, M.black, -.525, 1.18, z, 0, 0, -1.06),
+          box(.08, .50, .07, M.black, .12, 1.18, z),
+          box(.16, .82, .07, M.white, 1.30, 1.235, z, 0, 0, 1.02));
+    }
+    for (const z of [-1.0, 1.0]) add(box(.13, .09, .17, M.white, -.78, .99, z), box(.05, .04, .09, M.black, -.80, .96, z * .93));
+
+    const PX = 400;
+    const mk = flip => tex(1720, 312, x => {
+      const X = v => (flip ? 2.15 - v : v + 2.15) * PX, Y = v => (1.02 - v) * PX;
+      x.fillStyle = '#06080a';
+      AX.forEach(a => { x.beginPath(); x.arc(X(a), Y(.33), .41 * PX, 0, 7); x.fill(); });
+      x.strokeStyle = 'rgba(0,0,0,.4)'; x.lineWidth = 3;
+      [-.85, .12, 1.02].forEach(v => { x.beginPath(); x.moveTo(X(v), Y(.80)); x.lineTo(X(v), Y(.30)); x.stroke(); });
+      x.fillStyle = '#aab0b5';
+      [-.12, .86].forEach(v => x.fillRect(X(flip ? v + .14 : v), Y(.775), .14 * PX, .035 * PX));
+    });
+    const sR = decal(4.3, .78, mk(false)); sR.position.set(0, .63, .9115);
+    const sL = decal(4.3, .78, mk(true)); sL.position.set(0, .63, -.9115); sL.rotation.y = Math.PI;
+    add(sR, sL);
+
+    add(box(.06, .10, 1.30, M.black, -2.35, .36, 0));
+    add(box(.05, .24, .64, M.black, -2.36, .60, 0));
+    for (let i = -3; i <= 3; i++) add(box(.055, .20, .015, M.chrome, -2.375, .60, i * .085));
+    add(box(.05, .03, .70, M.chrome, -2.35, .72, 0));
+    for (const z of [-.66, .66]) {
+      const ry = z > 0 ? -.30 : .30;
+      add(box(.06, .11, .50, M.lamp, -2.285, .75, z, 0, ry, 0));
+      add(box(.04, .06, .18, M.lamp, -2.385, .36, z * .93));
+    }
+    const pt = tex(256, 56, x => {
+      x.fillStyle = '#f3f3ee'; x.fillRect(0, 0, 256, 56);
+      x.fillStyle = '#1747a8'; x.fillRect(0, 0, 26, 56);
+      x.fillStyle = '#fff'; x.font = 'bold 14px Arial'; x.textAlign = 'center'; x.fillText('CZ', 13, 50);
+      x.fillStyle = '#111'; x.font = 'bold 40px Arial'; x.textBaseline = 'middle'; x.fillText('4B2 7391', 148, 30);
+    });
+    const pF = decal(.52, .114, pt, false); pF.position.set(-2.39, .40, 0); pF.rotation.y = -Math.PI / 2;
+    const pB = decal(.52, .114, pt, false); pB.position.set(2.375, .42, 0); pB.rotation.y = Math.PI / 2;
+    add(pF, pB);
+
+    // Zadní světla: dole na nárazníku + svislá po stranách výklopných dveří
+    for (const z of [-.62, .62]) add(box(.05, .12, .42, M.red, 2.365, .88, z));
+    add(box(.04, .26, 1.66, M.dark, 2.35, .40, 0));
+    AX.forEach(x => [-.85, .85].forEach(z => add(wheel(x, z))));
+
+    add(box(.02, .34, .02, M.black, .85, 1.635, -.5, 0, 0, -.10));
+
+    g.position.y = .02;
+    g.scale.set(0.90, 0.90, 0.90);
+    return g;
+  }
+
+
+  return createPoliceCarTemplate;
+  })();
+
+  REG['combi_civil'] = (function () {
+  // --- POLICEJNÍ COMBI ---
+  const BODY = BODY_COLOR;
+
+  const std = (c, r, m, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, o));
+  const M = {
+    white: BODY_MAT,
+    dark: std(0x14181d, .5, .15),
+    black: std(0x08090a, .7, 0),
+    glass: std(0x0d1822, .08, .35),
+    chrome: std(0xc4cbcf, .18, .9),
+    red: std(0xc0161b, .25, .15, { emissive: 0x400000 }),
+    lamp: std(0xffffff, .08, .1, { emissive: 0x7fbfff, emissiveIntensity: .5 }),
+    beaconL: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    beaconR: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    rim: std(0xc9ced2, .3, .7)
+  };
+  const BLUE = '#0a4bbd', YEL = '#ffd81a', INK = '#0a3f9e';
+  const BL = '#1668c8', LM = '#d6f21c', AX = [-1.46, 1.226];
+
+  function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    o.position.set(x, y, z); o.rotation.set(rx, ry, rz); return o;
+  }
+  function tex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'));
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w, h, t, lit = true) {
+    const Mat = lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new Mat({ map: t, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  }
+  function spaced(x, str, cx, cy, sp) {
+    const ws = [...str].map(ch => x.measureText(ch).width);
+    let px = cx - (ws.reduce((a, b) => a + b, 0) + sp * (str.length - 1)) / 2;
+    [...str].forEach((ch, i) => { x.fillText(ch, px, cy); px += ws[i] + sp; });
+  }
+  function bodyProfile() {
+    const s = new THREE.Shape();
+    s.moveTo(-2.28, .24);
+    [[-2.33, .42], [-2.31, .70], [-2.20, .80], [-1.05, .93], [1.30, .99], [2.05, 1.01], [2.29, 1.0], [2.33, .62], [2.27, .26]]
+      .forEach(p => s.lineTo(p[0], p[1]));
+    return s;
+  }
+  function wheel(x, z) {
+    const w = new THREE.Group(), s = Math.sign(z);
+    const cyl = (r, h, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); o.rotation.x = Math.PI / 2; return o; };
+    w.add(cyl(.33, .21, M.black), cyl(.235, .215, M.rim), cyl(.05, .23, M.chrome));
+    for (let a = 0; a < 5; a++) w.add(box(.022, .46, .008, M.dark, 0, 0, s * .109, 0, 0, a * Math.PI / 5 + .3));
+    w.position.set(x, .33, z);
+    return w;
+  }
+
+  function createPoliceCarTemplate() {
+    const g = new THREE.Group(), add = (...o) => o.forEach(m => g.add(m));
+
+    const bg = new THREE.ExtrudeGeometry(bodyProfile(), { depth: 1.75, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .045, bevelThickness: .035 });
+    bg.translate(0, 0, -.875);
+    add(new THREE.Mesh(bg, M.white));
+    add(box(4.4, .2, 1.5, M.black, -.05, .17, 0), box(1.8, .08, 1.84, M.black, -.1, .30, 0));
+
+    // COMBI: nástavba se táhne téměř až k zadní hraně, záď je skoro svislá
+    const gs = new THREE.Shape();
+    gs.moveTo(-.95, .93); gs.lineTo(-.10, 1.42); gs.lineTo(2.12, 1.45); gs.lineTo(2.27, .99);
+    const gg = new THREE.ExtrudeGeometry(gs, { depth: 1.56, bevelEnabled: false });
+    gg.translate(0, 0, -.78);
+    add(new THREE.Mesh(gg, M.glass), box(2.30, .05, 1.58, M.white, 1.03, 1.44, 0));
+    for (const z of [-.79, .79]) {
+      add(box(.06, .98, .07, M.black, -.525, 1.18, z, 0, 0, -1.06),   // A sloupek
+          box(.08, .50, .07, M.black, .12, 1.18, z),                   // B sloupek
+          box(.10, .50, .07, M.white, 1.42, 1.19, z),                  // C sloupek
+          box(.10, .50, .07, M.white, 2.195, 1.22, z, 0, 0, .31));     // D sloupek (klopená záď)
+      add(box(2.05, .03, .04, M.chrome, 1.0, 1.485, z * .88));         // střešní ližiny
+    }
+    for (const z of [-1.0, 1.0]) add(box(.13, .09, .17, M.white, -.78, .99, z), box(.05, .04, .09, M.black, -.80, .96, z * .93));
+
+    const PX = 400;
+    const mk = flip => tex(1720, 312, x => {
+      const X = v => (flip ? 2.15 - v : v + 2.15) * PX, Y = v => (1.02 - v) * PX;
+      x.fillStyle = '#06080a';
+      AX.forEach(a => { x.beginPath(); x.arc(X(a), Y(.33), .41 * PX, 0, 7); x.fill(); });
+      x.strokeStyle = 'rgba(0,0,0,.4)'; x.lineWidth = 3;
+      [-.85, .12, 1.02].forEach(v => { x.beginPath(); x.moveTo(X(v), Y(.80)); x.lineTo(X(v), Y(.30)); x.stroke(); });
+      x.fillStyle = '#aab0b5';
+      [-.12, .86].forEach(v => x.fillRect(X(flip ? v + .14 : v), Y(.775), .14 * PX, .035 * PX));
+    });
+    const sR = decal(4.3, .78, mk(false)); sR.position.set(0, .63, .9115);
+    const sL = decal(4.3, .78, mk(true)); sL.position.set(0, .63, -.9115); sL.rotation.y = Math.PI;
+    add(sR, sL);
+
+    add(box(.06, .10, 1.30, M.black, -2.35, .36, 0));
+    add(box(.05, .24, .64, M.black, -2.36, .60, 0));
+    for (let i = -3; i <= 3; i++) add(box(.055, .20, .015, M.chrome, -2.375, .60, i * .085));
+    add(box(.05, .03, .70, M.chrome, -2.35, .72, 0));
+    for (const z of [-.66, .66]) {
+      const ry = z > 0 ? -.30 : .30;
+      add(box(.06, .11, .50, M.lamp, -2.285, .75, z, 0, ry, 0));
+      add(box(.04, .06, .18, M.lamp, -2.385, .36, z * .93));
+    }
+    const pt = tex(256, 56, x => {
+      x.fillStyle = '#f3f3ee'; x.fillRect(0, 0, 256, 56);
+      x.fillStyle = '#1747a8'; x.fillRect(0, 0, 26, 56);
+      x.fillStyle = '#fff'; x.font = 'bold 14px Arial'; x.textAlign = 'center'; x.fillText('CZ', 13, 50);
+      x.fillStyle = '#111'; x.font = 'bold 40px Arial'; x.textBaseline = 'middle'; x.fillText('4B2 7391', 148, 30);
+    });
+    const pF = decal(.52, .114, pt, false); pF.position.set(-2.39, .40, 0); pF.rotation.y = -Math.PI / 2;
+    const pB = decal(.52, .114, pt, false); pB.position.set(2.375, .42, 0); pB.rotation.y = Math.PI / 2;
+    add(pF, pB);
+
+    // Zadní světla: dole na nárazníku + svislá po stranách výklopných dveří
+    for (const z of [-.62, .62]) add(box(.05, .12, .42, M.red, 2.365, .88, z));
+    for (const z of [-.80, .80]) add(box(.09, .40, .12, M.red, 2.30, 1.10, z, 0, 0, .10));
+    add(box(.04, .26, 1.66, M.dark, 2.35, .40, 0));
+    add(box(.03, .03, 1.56, M.black, 2.30, 1.03, 0));                  // spára výklopných dveří
+    AX.forEach(x => [-.85, .85].forEach(z => add(wheel(x, z))));
+
+    add(box(.02, .34, .02, M.black, 1.75, 1.635, -.5, 0, 0, -.10));
+
+    g.position.y = .02;
+    g.scale.set(0.90, 0.90, 0.90);
+    return g;
+  }
+
+
+  return createPoliceCarTemplate;
+  })();
+
+  REG['van_civil'] = (function () {
+  // --- POLICEJNÍ DODÁVKA ---
+  const BODY = BODY_COLOR;
+
+  const std = (c, r, m, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, o));
+  const M = {
+    white: BODY_MAT,
+    dark: std(0x14181d, .5, .15),
+    black: std(0x08090a, .7, 0),
+    glass: std(0x0d1822, .08, .35),
+    chrome: std(0xc4cbcf, .18, .9),
+    red: std(0xc0161b, .25, .15, { emissive: 0x400000 }),
+    lamp: std(0xffffff, .08, .1, { emissive: 0x7fbfff, emissiveIntensity: .5 }),
+    beaconL: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    beaconR: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    rim: std(0xc9ced2, .3, .7)
+  };
+  const BL = '#1668c8', LM = '#d6f21c', AX = [-1.5, 1.55];
+  const ROOF = 2.12, W = 1.9;
+
+  function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    o.position.set(x, y, z); o.rotation.set(rx, ry, rz); return o;
+  }
+  function tex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'));
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w, h, t, lit = true) {
+    const Mat = lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new Mat({ map: t, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  }
+  function spaced(x, str, cx, cy, sp) {
+    const ws = [...str].map(ch => x.measureText(ch).width);
+    let px = cx - (ws.reduce((a, b) => a + b, 0) + sp * (str.length - 1)) / 2;
+    [...str].forEach((ch, i) => { x.fillText(ch, px, cy); px += ws[i] + sp; });
+  }
+  function bodyProfile() {
+    const s = new THREE.Shape();
+    s.moveTo(-2.28, .24);
+    [[-2.34, .45], [-2.32, .90], [-2.10, 1.05], [-1.52, ROOF], [2.28, ROOF], [2.35, 1.95], [2.35, .60], [2.28, .26]]
+      .forEach(p => s.lineTo(p[0], p[1]));
+    return s;
+  }
+  function wheel(x, z) {
+    const w = new THREE.Group(), s = Math.sign(z);
+    const cyl = (r, h, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); o.rotation.x = Math.PI / 2; return o; };
+    w.add(cyl(.33, .21, M.black), cyl(.235, .215, M.rim), cyl(.05, .23, M.chrome));
+    for (let a = 0; a < 5; a++) w.add(box(.022, .46, .008, M.dark, 0, 0, s * .109, 0, 0, a * Math.PI / 5 + .3));
+    w.scale.set(1.1, 1.1, 1);
+    w.position.set(x, .36, z);
+    return w;
+  }
+
+  function createPoliceVan() {
+    const g = new THREE.Group(), add = (...o) => o.forEach(m => g.add(m));
+
+    const bg = new THREE.ExtrudeGeometry(bodyProfile(), { depth: W, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .045, bevelThickness: .035 });
+    bg.translate(0, 0, -W / 2);
+    add(new THREE.Mesh(bg, M.white));
+    add(box(4.6, .2, 1.6, M.black, 0, .2, 0));
+
+    // Čelní sklo (šikmé) + rámeček
+    add(box(.03, .92, 1.80, M.black, -1.864, 1.595, 0, 0, 0, -.514),
+        box(.03, .78, 1.64, M.glass, -1.878, 1.603, 0, 0, 0, -.514));
+
+    // Boční okna kabiny a malá okna v nástavbě
+    const Z = .99;
+    for (const z of [-Z, Z]) {
+      add(box(1.05, .68, .02, M.black, -.95, 1.68, z), box(.95, .60, .03, M.glass, -.95, 1.68, z * 1.003));
+      add(box(.68, .43, .02, M.black, 1.3, 1.75, z), box(.60, .35, .03, M.glass, 1.3, 1.75, z * 1.003));
+      add(box(.10, .28, .08, M.dark, -1.55, 1.50, z * 1.09), box(.05, .04, .12, M.black, -1.55, 1.42, z * 1.03));
+    }
+
+    // Boční polepy
+    const PX = 300;
+    const mk = flip => tex(1440, 570, x => {
+      const X = v => (flip ? 2.4 - v : v + 2.4) * PX, Y = v => (ROOF - v) * PX;
+      x.fillStyle = '#06080a';
+      AX.forEach(a => { x.beginPath(); x.arc(X(a), Y(.36), .44 * PX, 0, 7); x.fill(); });
+      x.strokeStyle = 'rgba(0,0,0,.4)'; x.lineWidth = 3;
+      [-.35, 1.65].forEach(v => { x.beginPath(); x.moveTo(X(v), Y(2.0)); x.lineTo(X(v), Y(.30)); x.stroke(); });
+      x.fillStyle = '#aab0b5';
+      [-.30, 1.55].forEach(v => x.fillRect(X(flip ? v + .14 : v), Y(1.10), .14 * PX, .035 * PX));
+    });
+    const sR = decal(4.8, W, mk(false)); sR.position.set(0, ROOF - W / 2, .9865);
+    const sL = decal(4.8, W, mk(true)); sL.position.set(0, ROOF - W / 2, -.9865); sL.rotation.y = Math.PI;
+    add(sR, sL);
+
+    // Předek: nárazník, maska, světlomety
+    add(box(.10, .14, 1.90, M.dark, -2.40, .33, 0));
+    add(box(.05, .26, .90, M.black, -2.385, .70, 0));
+    for (let i = 0; i < 4; i++) add(box(.06, .02, .86, M.chrome, -2.39, .62 + i * .05, 0));
+    for (const z of [-.72, .72]) {
+      add(box(.06, .14, .42, M.lamp, -2.36, .84, z));
+    }
+    const pt = tex(256, 56, x => {
+      x.fillStyle = '#f3f3ee'; x.fillRect(0, 0, 256, 56);
+      x.fillStyle = '#1747a8'; x.fillRect(0, 0, 26, 56);
+      x.fillStyle = '#fff'; x.font = 'bold 14px Arial'; x.textAlign = 'center'; x.fillText('CZ', 13, 50);
+      x.fillStyle = '#111'; x.font = 'bold 40px Arial'; x.textBaseline = 'middle'; x.fillText('4B2 7391', 148, 30);
+    });
+    const pF = decal(.52, .114, pt, false); pF.position.set(-2.455, .45, 0); pF.rotation.y = -Math.PI / 2;
+    const pB = decal(.52, .114, pt, false); pB.position.set(2.435, .60, 0); pB.rotation.y = Math.PI / 2;
+    add(pF, pB);
+
+    // Záď: dvoukřídlé dveře, okna, světla, nárazník
+    add(box(.10, .20, 1.90, M.dark, 2.42, .34, 0));
+    add(box(.03, 1.50, .03, M.black, 2.385, 1.20, 0));
+    for (const z of [-.42, .42]) add(box(.03, .46, .70, M.black, 2.385, 1.58, z), box(.03, .38, .62, M.glass, 2.395, 1.58, z));
+    for (const z of [-.86, .86]) add(box(.06, .55, .12, M.red, 2.37, .95, z));
+    // Kola
+    AX.forEach(x => [-.93, .93].forEach(z => add(wheel(x, z))));
+
+    // Střecha: maják, průduch, anténa
+    add(box(.70, .10, .50, M.white, 1.0, ROOF + .085, .3));
+    add(box(.02, .34, .02, M.black, 1.9, ROOF + .20, -.5, 0, 0, -.10));
+
+    g.position.y = -.35;
+    g.scale.set(0.90, 0.90, 0.90);
+    return g;
+  }
+
+
+  return createPoliceVan;
+  })();
+
+  REG['truck_civil'] = (function () {
+  // --- POLICEJNÍ KAMION S NÁVĚSEM ---
+  const BODY = BODY_COLOR;
+
+  const std = (c, r, m, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, o));
+  const M = {
+    white: BODY_MAT,
+    dark: std(0x14181d, .5, .15),
+    black: std(0x08090a, .7, 0),
+    glass: std(0x0d1822, .08, .35),
+    chrome: std(0xc4cbcf, .18, .9),
+    red: std(0xc0161b, .25, .15, { emissive: 0x400000 }),
+    lime: std(0xd6f21c, .4, .1),
+    lamp: std(0xffffff, .08, .1, { emissive: 0x7fbfff, emissiveIntensity: .5 }),
+    beaconL: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    beaconR: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    rim: std(0xc9ced2, .3, .7)
+  };
+  const BL = '#1668c8', LM = '#d6f21c';
+
+  function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    o.position.set(x, y, z); o.rotation.set(rx, ry, rz); return o;
+  }
+  function cylV(r, h, mat, x, y, z) {
+    const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 16), mat);
+    o.position.set(x, y, z); return o;
+  }
+  function tex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'));
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w, h, t, lit = true) {
+    const Mat = lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new Mat({ map: t, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  }
+  function spaced(x, str, cx, cy, sp) {
+    const ws = [...str].map(ch => x.measureText(ch).width);
+    let px = cx - (ws.reduce((a, b) => a + b, 0) + sp * (str.length - 1)) / 2;
+    [...str].forEach((ch, i) => { x.fillText(ch, px, cy); px += ws[i] + sp; });
+  }
+  function wheel(x, z) {
+    const w = new THREE.Group(), s = Math.sign(z);
+    const cyl = (r, h, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); o.rotation.x = Math.PI / 2; return o; };
+    w.add(cyl(.33, .21, M.black), cyl(.235, .215, M.rim), cyl(.05, .23, M.chrome));
+    for (let a = 0; a < 5; a++) w.add(box(.022, .46, .008, M.dark, 0, 0, s * .109, 0, 0, a * Math.PI / 5 + .3));
+    w.scale.set(1.5, 1.5, 1);
+    w.position.set(x, .5, z);
+    return w;
+  }
+  function cabProfile() {
+    const s = new THREE.Shape();
+    s.moveTo(-5.95, .80);
+    [[-6.02, 1.0], [-6.02, 2.15], [-5.75, 3.30], [-4.0, 3.32], [-3.90, 3.25], [-3.90, .80]]
+      .forEach(p => s.lineTo(p[0], p[1]));
+    return s;
+  }
+  const plate = () => tex(256, 56, x => {
+    x.fillStyle = '#f3f3ee'; x.fillRect(0, 0, 256, 56);
+    x.fillStyle = '#1747a8'; x.fillRect(0, 0, 26, 56);
+    x.fillStyle = '#fff'; x.font = 'bold 14px Arial'; x.textAlign = 'center'; x.fillText('CZ', 13, 50);
+    x.fillStyle = '#111'; x.font = 'bold 40px Arial'; x.textBaseline = 'middle'; x.fillText('4B2 7391', 148, 30);
+  });
+
+  function createPoliceTruck() {
+    const g = new THREE.Group(), add = (...o) => o.forEach(m => g.add(m));
+
+    // ===== Tahač =====
+    const bg = new THREE.ExtrudeGeometry(cabProfile(), { depth: 1.95, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .045, bevelThickness: .035 });
+    bg.translate(0, 0, -.975);
+    add(new THREE.Mesh(bg, M.white));
+    add(box(5.0, .30, 1.2, M.black, -3.6, .75, 0));            // rám
+    add(box(.9, .08, 1.3, M.dark, -2.2, .94, 0));              // točnice
+    add(box(.5, .5, 1.75, M.white, -4.20, 3.55, 0, 0, 0, .25)); // spoiler
+
+    // čelní sklo (šikmé)
+    add(box(.03, .92, 1.70, M.black, -5.948, 2.737, 0, 0, 0, -.23),
+        box(.03, .78, 1.56, M.glass, -5.958, 2.742, 0, 0, 0, -.23));
+
+    // boční okna, zpětná zrcátka, výfuky
+    for (const z of [-1, 1]) {
+      add(box(.95, .74, .02, M.black, -5.30, 2.62, z * 1.012), box(.88, .66, .03, M.glass, -5.30, 2.62, z * 1.017));
+      add(box(.08, .55, .14, M.dark, -5.85, 2.55, z * 1.25), box(.05, .05, .30, M.black, -5.85, 2.40, z * 1.10));
+      add(cylV(.06, 3.0, M.chrome, -3.75, 2.4, z * 1.10));
+    }
+
+    // předek
+    add(box(.20, .30, 2.0, M.dark, -6.10, .75, 0));
+    add(box(.05, .50, 1.0, M.black, -6.055, 1.50, 0));
+    for (let i = 0; i < 4; i++) add(box(.06, .02, .96, M.chrome, -6.06, 1.32 + i * .11, 0));
+    for (const z of [-.75, .75]) {
+      add(box(.06, .22, .45, M.lamp, -6.04, 1.45, z));
+    }
+    const pF = decal(.52, .114, plate(), false); pF.position.set(-6.075, 1.0, 0); pF.rotation.y = -Math.PI / 2; add(pF);
+
+    // boční polepy kabiny
+    const PXc = 250;
+    const mkc = flip => tex(575, 700, x => {
+      const X = v => (flip ? -3.825 - v : v + 6.125) * PXc, Y = v => (3.375 - v) * PXc;
+      x.fillStyle = '#06080a';
+      x.beginPath(); x.arc(X(-5.2), Y(.52), .60 * PXc, 0, 7); x.fill();
+      x.strokeStyle = 'rgba(0,0,0,.4)'; x.lineWidth = 3;
+      [-5.95, -4.70].forEach(v => { x.beginPath(); x.moveTo(X(v), Y(2.30)); x.lineTo(X(v), Y(.95)); x.stroke(); });
+      x.fillStyle = '#aab0b5';
+      x.fillRect(X(flip ? -4.85 + .12 : -4.85), Y(1.95) + 2, .12 * PXc, .035 * PXc);
+    });
+    const cR = decal(2.3, 2.8, mkc(false)); cR.position.set(-4.975, 1.975, 1.0115);
+    const cL = decal(2.3, 2.8, mkc(true)); cL.position.set(-4.975, 1.975, -1.0115); cL.rotation.y = Math.PI;
+    add(cR, cL);
+
+    // maják na kabině
+    add(box(.02, .34, .02, M.black, -4.6, 3.54, -.5, 0, 0, -.10));
+
+    // ===== Návěs (větší) =====
+    add(box(10, 2.9, 2.1, M.white, 1.8, 2.50, 0));
+    add(box(10, .18, 2.05, M.black, 1.8, 1.04, 0));
+    add(box(9.4, .15, 1.4, M.dark, 2.0, .88, 0));
+    for (const z of [-.7, .7]) add(box(.10, .8, .10, M.dark, -2.4, .55, z));   // opěrné nohy
+    add(box(.9, .12, 1.2, M.dark, -2.8, .96, 0));                              // královský čep
+    add(box(9.8, .06, 2.12, M.black, 1.8, 3.95, 0));                           // střešní lem
+
+    // záď návěsu
+    add(box(.10, .16, 1.95, M.dark, 6.82, .72, 0));
+    for (const z of [-.85, .85]) add(box(.08, .30, .08, M.dark, 6.78, .84, z));
+    add(box(.03, 2.8, .03, M.black, 6.81, 2.50, 0));
+    for (const y of [1.5, 3.5]) for (const z of [-.9, .9]) add(box(.04, .08, .10, M.black, 6.81, y, z));
+    for (const z of [-.95, .95]) add(box(.06, .50, .12, M.red, 6.83, 1.30, z));
+    add(box(.02, .10, 2.05, M.red, 6.81, 1.62, 0));
+    add(box(.02, .08, 2.05, M.lime, 6.81, 1.50, 0));
+    const pB = decal(.52, .114, plate(), false); pB.position.set(6.84, 1.05, 0); pB.rotation.y = Math.PI / 2; add(pB);
+
+    // ===== Kola =====
+    [-5.2].forEach(x => [-.96, .96].forEach(z => add(wheel(x, z))));
+    [-2.7, -1.6, 5.4, 6.3].forEach(x => [-.95, -.67, .67, .95].forEach(z => add(wheel(x, z))));
+    for (const x of [-5.2, -2.7, -1.6, 5.4, 6.3]) add(box(.08, .08, 1.8, M.dark, x, .5, 0));
+    for (const x of [-1.1, 6.75]) for (const z of [-.95, .95]) add(box(.03, .4, .5, M.black, x, .70, z));
+
+    const w = new THREE.Group();
+    g.position.set(-.4, -2.0, 0);
+    w.add(g);
+    w.scale.set(0.46, 0.46, 0.46);
+    return w;
+  }
+
+
+  return createPoliceTruck;
+  })();
+
+  REG['jeep_civil'] = (function () {
+  // --- JEEP ---
+  const std = (c, r, m, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, o));
+  const M = {
+    white: BODY_MAT,
+    dark: std(0x14181d, .5, .15),
+    black: std(0x08090a, .7, 0),
+    glass: std(0x0d1822, .08, .35),
+    chrome: std(0xc4cbcf, .18, .9),
+    red: std(0xc0161b, .25, .15, { emissive: 0x400000 }),
+    amber: std(0xff9a00, .3, .1, { emissive: 0x803000, emissiveIntensity: .6 }),
+    lamp: std(0xffffff, .08, .1, { emissive: 0x7fbfff, emissiveIntensity: .5 }),
+    rim: std(0xc9ced2, .3, .7)
+  };
+  const AX = [-1.3, 1.3];
+
+  function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    o.position.set(x, y, z); o.rotation.set(rx, ry, rz); return o;
+  }
+  function cylX(r, h, mat, x, y, z) {
+    const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), mat);
+    o.rotation.z = Math.PI / 2; o.position.set(x, y, z); return o;
+  }
+  function tex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'));
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w, h, t, lit = true) {
+    const Mat = lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new Mat({ map: t, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  }
+  function jeepProfile() {
+    const s = new THREE.Shape();
+    s.moveTo(-2.12, .44);
+    [[-2.18, .56], [-2.18, 1.05], [-2.05, 1.14], [-.85, 1.16], [2.05, 1.16], [2.15, 1.08], [2.15, .56], [2.08, .44]]
+      .forEach(p => s.lineTo(p[0], p[1]));
+    return s;
+  }
+  function wheel(x, z) {
+    const w = new THREE.Group(), s = Math.sign(z);
+    const cyl = (r, h, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); o.rotation.x = Math.PI / 2; return o; };
+    w.add(cyl(.33, .21, M.black), cyl(.235, .215, M.rim), cyl(.05, .23, M.chrome));
+    for (let a = 0; a < 5; a++) w.add(box(.022, .46, .008, M.dark, 0, 0, s * .109, 0, 0, a * Math.PI / 5 + .3));
+    w.scale.set(1.27, 1.27, 1.3);
+    w.position.set(x, .42, z);
+    return w;
+  }
+
+  function createJeep() {
+    const g = new THREE.Group(), add = (...o) => o.forEach(m => g.add(m));
+
+    const bg = new THREE.ExtrudeGeometry(jeepProfile(), { depth: 1.8, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .045, bevelThickness: .035 });
+    bg.translate(0, 0, -.9);
+    add(new THREE.Mesh(bg, M.white));
+    add(box(4.0, .14, 1.5, M.black, 0, .36, 0));
+    add(box(1.25, .05, 1.0, M.white, -1.45, 1.23, 0));                 // vybouleni kapoty
+
+    // kabina
+    add(box(2.5, .66, 1.74, M.glass, .6, 1.50, 0));
+    add(box(2.66, .07, 1.86, M.white, .60, 1.865, 0));
+    for (const z of [-.88, .88]) add(box(.10, .70, .06, M.black, .50, 1.50, z), box(.12, .70, .07, M.black, 1.84, 1.50, z), box(2.5, .05, .06, M.black, .6, 1.82, z));
+    add(box(.05, .78, 1.72, M.black, -.735, 1.485, 0, 0, 0, -.264), box(.03, .64, 1.56, M.glass, -.764, 1.493, 0, 0, 0, -.264));
+    add(box(.04, .66, 1.76, M.black, 1.862, 1.50, 0), box(.03, .50, 1.56, M.glass, 1.878, 1.50, 0));
+
+    // boky: spary dveri, kliky, prahy, blatniky
+    for (const z of [-1, 1]) {
+      add(box(.02, .56, .012, M.black, .55, .88, z * .94), box(.02, .56, .012, M.black, -.72, .88, z * .94));
+      add(box(.15, .03, .03, M.chrome, .30, 1.06, z * .948));
+      add(box(3.0, .10, .05, M.black, 0, .52, z * .955));
+      AX.forEach(x => add(box(1.15, .07, .36, M.black, x, .98, z * .99)));
+      add(box(.06, .26, .12, M.dark, -.82, 1.42, z * 1.07), box(.04, .04, .22, M.black, -.82, 1.35, z * .95));
+    }
+
+    // predek
+    add(box(.03, .44, 1.06, M.white, -2.235, .82, 0));
+    for (let i = -3; i <= 3; i++) add(box(.045, .32, .06, M.black, -2.245, .82, i * .13));
+    for (const z of [-.78, .78]) {
+      add(cylX(.20, .07, M.chrome, -2.225, .90, z), cylX(.17, .10, M.lamp, -2.245, .90, z));
+      add(box(.05, .09, .16, M.amber, -2.24, .65, z));
+    }
+    add(box(.22, .24, 1.98, M.black, -2.30, .46, 0), box(.14, .06, 1.3, M.dark, -2.26, .30, 0));
+
+    // zad: rezerva, svetla, naraznik
+    add(cylX(.40, .22, M.black, 2.31, 1.15, 0), cylX(.26, .23, M.white, 2.315, 1.15, 0), cylX(.06, .24, M.chrome, 2.32, 1.15, 0));
+    for (const z of [-.80, .80]) add(box(.06, .32, .16, M.red, 2.20, .90, z));
+    add(box(.22, .24, 1.98, M.black, 2.30, .46, 0));
+
+    // znacky
+    const pt = tex(256, 56, x => {
+      x.fillStyle = '#f3f3ee'; x.fillRect(0, 0, 256, 56);
+      x.fillStyle = '#1747a8'; x.fillRect(0, 0, 26, 56);
+      x.fillStyle = '#fff'; x.font = 'bold 14px Arial'; x.textAlign = 'center'; x.fillText('CZ', 13, 50);
+      x.fillStyle = '#111'; x.font = 'bold 40px Arial'; x.textBaseline = 'middle'; x.fillText('4B2 7391', 148, 30);
+    });
+    const pF = decal(.52, .114, pt, false); pF.position.set(-2.425, .46, 0); pF.rotation.y = -Math.PI / 2;
+    const pB = decal(.52, .114, pt, false); pB.position.set(2.205, .66, 0); pB.rotation.y = Math.PI / 2;
+    add(pF, pB);
+
+    AX.forEach(x => [-.96, .96].forEach(z => add(wheel(x, z))));
+
+    g.position.y = .02;
+    g.scale.set(0.85, 0.85, 0.85);
+    return g;
+  }
+
+  return createJeep;
+  })();
+  REG['sport_civil'] = (function () {
+  // --- SPORTOVNI AUTO ---
+  const std = (c, r, m, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, o));
+  const M = {
+    white: BODY_MAT,
+    dark: std(0x14181d, .5, .15),
+    black: std(0x08090a, .7, 0),
+    glass: std(0x0d1822, .08, .35),
+    chrome: std(0xc4cbcf, .18, .9),
+    red: std(0xc0161b, .25, .15, { emissive: 0x600000, emissiveIntensity: 1.2 }),
+    lamp: std(0xffffff, .08, .1, { emissive: 0x7fbfff, emissiveIntensity: .5 }),
+    rim: std(0xc9ced2, .3, .7)
+  };
+  const AX = [-1.35, 1.25];
+
+  function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    o.position.set(x, y, z); o.rotation.set(rx, ry, rz); return o;
+  }
+  function cylX(r, h, mat, x, y, z) {
+    const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 24), mat);
+    o.rotation.z = Math.PI / 2; o.position.set(x, y, z); return o;
+  }
+  function tex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'));
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w, h, t, lit = true) {
+    const Mat = lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new Mat({ map: t, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  }
+  function sportProfile() {
+    const s = new THREE.Shape();
+    s.moveTo(-2.15, .21);
+    [[-2.25, .34], [-2.25, .50], [-2.05, .64], [-1.40, .79], [-.55, .85], [-.03, 1.14], [.85, 1.155], [1.75, .93], [2.15, .91], [2.26, .80], [2.26, .40], [2.15, .23]]
+      .forEach(p => s.lineTo(p[0], p[1]));
+    return s;
+  }
+  function sideWindow() {
+    const s = new THREE.Shape();
+    s.moveTo(-.35, .88); s.lineTo(.02, 1.095); s.lineTo(.82, 1.105); s.lineTo(1.40, .94); s.lineTo(1.40, .88);
+    return s;
+  }
+  function wheel(x, z) {
+    const w = new THREE.Group(), s = Math.sign(z);
+    const cyl = (r, h, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); o.rotation.x = Math.PI / 2; return o; };
+    w.add(cyl(.33, .21, M.black), cyl(.235, .215, M.rim), cyl(.05, .23, M.chrome));
+    for (let a = 0; a < 5; a++) w.add(box(.022, .46, .008, M.dark, 0, 0, s * .109, 0, 0, a * Math.PI / 5 + .3));
+    w.scale.set(1.09, 1.09, 1.25);
+    w.position.set(x, .36, z);
+    return w;
+  }
+
+  function createSportCar() {
+    const g = new THREE.Group(), add = (...o) => o.forEach(m => g.add(m));
+
+    const bg = new THREE.ExtrudeGeometry(sportProfile(), { depth: 1.75, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .045, bevelThickness: .035 });
+    bg.translate(0, 0, -.875);
+    add(new THREE.Mesh(bg, M.white));
+    add(box(4.3, .12, 1.55, M.black, 0, .22, 0));
+
+    // sklo: celni (silne sklonene), zadni, boční okna
+    add(box(.03, .56, 1.50, M.black, -.319, 1.047, 0, 0, 0, -1.06), box(.03, .48, 1.42, M.glass, -.324, 1.056, 0, 0, 0, -1.06));
+    add(box(.75, .03, 1.30, M.glass, 1.315, 1.088, 0, 0, 0, -.26));
+    const wg = new THREE.ExtrudeGeometry(sideWindow(), { depth: .03, bevelEnabled: false });
+    const wR = new THREE.Mesh(wg, M.glass); wR.position.z = .895;
+    const wL = new THREE.Mesh(wg, M.glass); wL.position.z = -.925;
+    add(wR, wL);
+
+    // kapota, zrcatka, prahy, bocni nasavani
+    for (const z of [-.35, .35]) add(box(.5, .02, .18, M.black, -1.15, .835, z));
+    for (const z of [-1, 1]) {
+      add(box(.12, .09, .12, M.white, -.36, .95, z * 1.0), box(.05, .04, .12, M.black, -.35, .90, z * .93));
+      add(box(2.7, .07, .05, M.black, -.05, .27, z * .925));
+      add(box(.40, .15, .02, M.black, 1.15, .60, z * .925));
+    }
+
+    // spoiler
+    for (const z of [-.62, .62]) add(box(.04, .12, .05, M.black, 2.03, 1.0, z));
+    add(box(.32, .03, 1.55, M.white, 2.03, 1.065, 0, 0, 0, .08));
+
+    // predek: nasavani, splitter, svetlomety
+    add(box(.04, .16, 1.25, M.black, -2.30, .38, 0), box(.28, .035, 1.85, M.black, -2.26, .215, 0));
+    for (const z of [-.62, .62]) add(box(.10, .08, .42, M.lamp, -2.14, .64, z, 0, z > 0 ? -.25 : .25, 0));
+
+    // zad: svetla, difuzor, vyfuky
+    add(box(.04, .07, .9, M.red, 2.31, .80, 0));
+    for (const z of [-.65, .65]) add(cylX(.09, .05, M.red, 2.305, .78, z));
+    add(box(.10, .16, 1.45, M.black, 2.30, .30, 0));
+    for (const z of [-.42, .42]) add(cylX(.055, .16, M.chrome, 2.36, .34, z));
+
+    // znacky
+    const pt = tex(256, 56, x => {
+      x.fillStyle = '#f3f3ee'; x.fillRect(0, 0, 256, 56);
+      x.fillStyle = '#1747a8'; x.fillRect(0, 0, 26, 56);
+      x.fillStyle = '#fff'; x.font = 'bold 14px Arial'; x.textAlign = 'center'; x.fillText('CZ', 13, 50);
+      x.fillStyle = '#111'; x.font = 'bold 40px Arial'; x.textBaseline = 'middle'; x.fillText('4B2 7391', 148, 30);
+    });
+    const pF = decal(.52, .114, pt, false); pF.position.set(-2.335, .38, 0); pF.rotation.y = -Math.PI / 2;
+    const pB = decal(.52, .114, pt, false); pB.position.set(2.33, .56, 0); pB.rotation.y = Math.PI / 2;
+    add(pF, pB);
+
+    // boční výřezy kol, spáry dveří
+    const PX = 300;
+    const mk = flip => tex(1380, 390, x => {
+      const X = v => (flip ? 2.3 - v : v + 2.3) * PX, Y = v => (1.3 - v) * PX;
+      x.fillStyle = '#06080a';
+      AX.forEach(a => { x.beginPath(); x.arc(X(a), Y(.36), .43 * PX, 0, 7); x.fill(); });
+      x.strokeStyle = 'rgba(0,0,0,.45)'; x.lineWidth = 3;
+      [-.30, .80].forEach(v => { x.beginPath(); x.moveTo(X(v), Y(.40)); x.lineTo(X(v), Y(.86)); x.stroke(); });
+      x.fillStyle = '#aab0b5';
+      x.fillRect(X(flip ? .70 + .16 : .70), Y(.80), .16 * PX, .03 * PX);
+    });
+    const sR = decal(4.6, 1.3, mk(false)); sR.position.set(0, .65, .9115);
+    const sL = decal(4.6, 1.3, mk(true)); sL.position.set(0, .65, -.9115); sL.rotation.y = Math.PI;
+    add(sR, sL);
+
+    AX.forEach(x => [-.87, .87].forEach(z => add(wheel(x, z))));
+
+    g.position.y = .02;
+    g.scale.set(0.9, 0.9, 0.9);
+    return g;
+  }
+
+  return createSportCar;
+  })();
+
+  REG['ramp_civil'] = (function () {
+  // --- POLICEJNÍ KAMION S NÁVĚSEM ---
+  const std = (c, r, m, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, o));
+  const M = {
+    white: BODY_MAT,
+    dark: std(0x14181d, .5, .15),
+    black: std(0x08090a, .7, 0),
+    glass: std(0x0d1822, .08, .35),
+    chrome: std(0xc4cbcf, .18, .9),
+    red: std(0xc0161b, .25, .15, { emissive: 0x400000 }),
+    lime: std(0xd6f21c, .4, .1),
+    lamp: std(0xffffff, .08, .1, { emissive: 0x7fbfff, emissiveIntensity: .5 }),
+    beaconL: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    beaconR: std(0x1260ff, .15, .1, { emissive: 0x004cff, emissiveIntensity: 2 }),
+    rim: std(0xc9ced2, .3, .7)
+  };
+  const BL = '#1668c8', LM = '#d6f21c';
+
+  function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    o.position.set(x, y, z); o.rotation.set(rx, ry, rz); return o;
+  }
+  function cylV(r, h, mat, x, y, z) {
+    const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 16), mat);
+    o.position.set(x, y, z); return o;
+  }
+  function tex(w, h, draw) {
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    draw(c.getContext('2d'));
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  }
+  function decal(w, h, t, lit = true) {
+    const Mat = lit ? THREE.MeshStandardMaterial : THREE.MeshBasicMaterial;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+      new Mat({ map: t, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  }
+  function spaced(x, str, cx, cy, sp) {
+    const ws = [...str].map(ch => x.measureText(ch).width);
+    let px = cx - (ws.reduce((a, b) => a + b, 0) + sp * (str.length - 1)) / 2;
+    [...str].forEach((ch, i) => { x.fillText(ch, px, cy); px += ws[i] + sp; });
+  }
+  function wheel(x, z) {
+    const w = new THREE.Group(), s = Math.sign(z);
+    const cyl = (r, h, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); o.rotation.x = Math.PI / 2; return o; };
+    w.add(cyl(.33, .21, M.black), cyl(.235, .215, M.rim), cyl(.05, .23, M.chrome));
+    for (let a = 0; a < 5; a++) w.add(box(.022, .46, .008, M.dark, 0, 0, s * .109, 0, 0, a * Math.PI / 5 + .3));
+    w.scale.set(1.5, 1.5, 1);
+    w.position.set(x, .5, z);
+    return w;
+  }
+  function cabProfile() {
+    const s = new THREE.Shape();
+    s.moveTo(-5.95, .80);
+    [[-6.02, 1.0], [-6.02, 2.15], [-5.75, 3.30], [-4.0, 3.32], [-3.90, 3.25], [-3.90, .80]]
+      .forEach(p => s.lineTo(p[0], p[1]));
+    return s;
+  }
+  const plate = () => tex(256, 56, x => {
+    x.fillStyle = '#f3f3ee'; x.fillRect(0, 0, 256, 56);
+    x.fillStyle = '#1747a8'; x.fillRect(0, 0, 26, 56);
+    x.fillStyle = '#fff'; x.font = 'bold 14px Arial'; x.textAlign = 'center'; x.fillText('CZ', 13, 50);
+    x.fillStyle = '#111'; x.font = 'bold 40px Arial'; x.textBaseline = 'middle'; x.fillText('4B2 7391', 148, 30);
+  });
+
+  function createRampTruck() {
+    const g = new THREE.Group(), add = (...o) => o.forEach(m => g.add(m));
+
+    // ===== Tahač =====
+    const bg = new THREE.ExtrudeGeometry(cabProfile(), { depth: 1.95, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: .045, bevelThickness: .035 });
+    bg.translate(0, 0, -.975);
+    add(new THREE.Mesh(bg, M.white));
+    add(box(5.0, .30, 1.2, M.black, -3.6, .75, 0));            // rám
+    add(box(.9, .08, 1.3, M.dark, -2.2, .94, 0));              // točnice
+
+    // čelní sklo (šikmé)
+    add(box(.03, .92, 1.70, M.black, -5.948, 2.737, 0, 0, 0, -.23),
+        box(.03, .78, 1.56, M.glass, -5.958, 2.742, 0, 0, 0, -.23));
+
+    // boční okna, zpětná zrcátka, výfuky
+    for (const z of [-1, 1]) {
+      add(box(.95, .74, .02, M.black, -5.30, 2.62, z * 1.012), box(.88, .66, .03, M.glass, -5.30, 2.62, z * 1.017));
+      add(box(.08, .55, .14, M.dark, -5.85, 2.55, z * 1.25), box(.05, .05, .30, M.black, -5.85, 2.40, z * 1.10));
+      add(cylV(.06, 3.0, M.chrome, -3.75, 2.4, z * 1.10));
+    }
+
+    // předek
+    add(box(.20, .30, 2.0, M.dark, -6.10, .75, 0));
+    add(box(.05, .50, 1.0, M.black, -6.055, 1.50, 0));
+    for (let i = 0; i < 4; i++) add(box(.06, .02, .96, M.chrome, -6.06, 1.32 + i * .11, 0));
+    for (const z of [-.75, .75]) {
+      add(box(.06, .22, .45, M.lamp, -6.04, 1.45, z));
+    }
+    const pF = decal(.52, .114, plate(), false); pF.position.set(-6.075, 1.0, 0); pF.rotation.y = -Math.PI / 2; add(pF);
+
+    // boční polepy kabiny
+    const PXc = 250;
+    const mkc = flip => tex(575, 700, x => {
+      const X = v => (flip ? -3.825 - v : v + 6.125) * PXc, Y = v => (3.375 - v) * PXc;
+      x.fillStyle = '#06080a';
+      x.beginPath(); x.arc(X(-5.2), Y(.52), .60 * PXc, 0, 7); x.fill();
+      x.strokeStyle = 'rgba(0,0,0,.4)'; x.lineWidth = 3;
+      [-5.95, -4.70].forEach(v => { x.beginPath(); x.moveTo(X(v), Y(2.30)); x.lineTo(X(v), Y(.95)); x.stroke(); });
+      x.fillStyle = '#aab0b5';
+      x.fillRect(X(flip ? -4.85 + .12 : -4.85), Y(1.95) + 2, .12 * PXc, .035 * PXc);
+    });
+    const cR = decal(2.3, 2.8, mkc(false)); cR.position.set(-4.975, 1.975, 1.0115);
+    const cL = decal(2.3, 2.8, mkc(true)); cL.position.set(-4.975, 1.975, -1.0115); cL.rotation.y = Math.PI;
+    add(cR, cL);
+
+    // maják na kabině
+    add(box(.02, .34, .02, M.black, -4.6, 3.54, -.5, 0, 0, -.10));
+
+    // ===== Nastavba: dlouhá šikmá rampa od země až na střechu kabiny =====
+    const ANG = .2621, RL = 12.73;                       // sklon a délka rampy
+    add(box(8.4, .12, 1.3, M.black, .3, .94, 0));        // podvozkový rám pod rampou
+    const ws = new THREE.Shape();                        // klín pod rampou (barva karoserie)
+    ws.moveTo(-4.0, 1.0); ws.lineTo(-4.0, 3.24); ws.lineTo(4.35, 1.0);
+    const wgeo = new THREE.ExtrudeGeometry(ws, { depth: 1.96, bevelEnabled: false });
+    wgeo.translate(0, 0, -.98);
+    add(new THREE.Mesh(wgeo, M.white));
+
+    const ramp = new THREE.Group();                      // pochozí plocha (počátek = horní hrana u kabiny)
+    ramp.add(box(RL, .12, 2.0, M.dark, RL / 2, -.06, 0));
+    for (let i = 0; i < 32; i++) ramp.add(box(.05, .03, 1.9, M.black, .3 + i * .4, .015, 0)); // žebra proti smyku
+    for (const z of [-1.0, 1.0]) ramp.add(box(RL, .10, .05, M.white, RL / 2, .02, z));        // boční lišty
+    for (const z of [-.97, .97]) ramp.add(box(RL, .16, .06, M.black, RL / 2, -.14, z));        // nosníky pod rampou
+    ramp.position.set(-4.0, 3.36, 0);
+    ramp.rotation.z = -ANG;
+    add(ramp);
+    for (const z of [-.95, .95]) add(box(.05, .22, .12, M.red, 8.22, .30, z));                // světla na konci rampy
+
+    // ===== Kola =====
+    [-5.2].forEach(x => [-.96, .96].forEach(z => add(wheel(x, z))));
+    [-2.7, -1.6, 2.6, 3.5].forEach(x => [-.95, -.67, .67, .95].forEach(z => add(wheel(x, z))));
+    for (const x of [-5.2, -2.7, -1.6, 2.6, 3.5]) add(box(.08, .08, 1.8, M.dark, x, .5, 0));
+    for (const x of [-1.1, 4.05]) for (const z of [-.95, .95]) add(box(.03, .4, .5, M.black, x, .70, z));
+
+    const w = new THREE.Group();
+    g.position.set(-1.1, -1.8, 0);
+    w.add(g);
+    w.scale.set(0.42, 0.42, 0.42);
+    return w;
+  }
+
+
+  return createRampTruck;
+  })();
+
+  // --- PŘEPÍNAČ MODELŮ ---
+  const MODELS = [
+    { id: 'sedan', name: 'Sedan',            cam: [0, 3, 6],     look: [0, .5, 0] },
+    { id: 'combi', name: 'Combi',            cam: [0, 3, 6],     look: [0, .5, 0] },
+    { id: 'van',   name: 'Dodávka',          cam: [0, 3.2, 7],   look: [0, .8, 0] },
+    { id: 'truck', name: 'Kamion s návěsem', cam: [0, 3.2, 12],  look: [0, 0, 0] },
+    { id: 'jeep',  name: 'Jeep',   civilOnly: true, cam: [0, 3, 6.3], look: [0, .6, 0] },
+    { id: 'sport', name: 'Sporťák', civilOnly: true, cam: [0, 3, 6.3], look: [0, .5, 0] },
+    { id: 'ramp',  name: 'Kamion s rampou', civilOnly: true, cam: [0, 3.2, 13], look: [0, 0, 0] }
+  ];
+  let modelIndex = 0, police = true;
+  const cache = {};
+
+  function showModel() {
+    const m = MODELS[modelIndex], eff = police && !m.civilOnly, key = m.id + '_' + (eff ? 'police' : 'civil');
+    if (!cache[key]) cache[key] = REG[key]();
+    if (car) scene.remove(car);
+    car = cache[key];
+    scene.add(car);
+    camera.position.set(m.cam[0], m.cam[1], m.cam[2]);
+    camera.lookAt(m.look[0], m.look[1], m.look[2]);
+    document.getElementById('nm').textContent = m.name;
+    document.getElementById('count').textContent = (modelIndex + 1) + ' / ' + MODELS.length;
+    document.getElementById('bPolice').classList.toggle('on', eff);
+    document.getElementById('bCivil').classList.toggle('on', !eff);
+    document.getElementById('bPolice').disabled = !!m.civilOnly;
+    document.getElementById('colors').style.display = eff ? 'none' : 'flex';
+  }
+  const COLOR_NAMES = ['Červená', 'Žlutá', 'Modrá', 'Zelená'];
+  const hex = c => '#' + c.toString(16).padStart(6, '0');
+  let colorIndex = PALETTE.indexOf(BODY_COLOR);
+  function setColor(i) {
+    colorIndex = i;
+    BODY_MAT.color.setHex(PALETTE[i]);
+    try { localStorage.setItem('carColor', String(i)); } catch (e) {}
+    document.getElementById('dot').style.background = hex(PALETTE[i]);
+    [...document.getElementById('colors').children].forEach((b, k) => b.classList.toggle('on', k === i));
+  }
+  const go = d => { modelIndex = (modelIndex + d + MODELS.length) % MODELS.length; showModel(); };
+  const setPolice = p => { if (MODELS[modelIndex].civilOnly) return; police = p; showModel(); };
+
+  function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0f1220);
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    document.body.insertBefore(renderer.domElement, document.getElementById('ui'));
+
+    scene.add(new THREE.HemisphereLight(0xddeeff, 0x20252b, 0.8));
+    const key = new THREE.DirectionalLight(0xffffff, 1.2);
+    key.position.set(-5, 8, 6);
+    scene.add(key);
+    const rim = new THREE.DirectionalLight(0x397dff, 0.6);
+    rim.position.set(5, 4, -6);
+    scene.add(rim);
+
+    const box = document.getElementById('colors');
+    PALETTE.forEach((c, i) => {
+      const b = document.createElement('button');
+      b.className = 'sw'; b.style.background = hex(c); b.title = COLOR_NAMES[i]; b.setAttribute('aria-label', COLOR_NAMES[i]);
+      b.addEventListener('click', () => setColor(i));
+      box.appendChild(b);
+    });
+    setColor(colorIndex);
+    document.getElementById('prev').addEventListener('click', () => go(-1));
+    document.getElementById('next').addEventListener('click', () => go(1));
+    document.getElementById('bPolice').addEventListener('click', () => setPolice(true));
+    document.getElementById('bCivil').addEventListener('click', () => setPolice(false));
+    window.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft') go(-1);
+      else if (e.key === 'ArrowRight') go(1);
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') setPolice(!police);
+    });
+
+    showModel();
+
+    const dom = renderer.domElement;
+    dom.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
+    dom.addEventListener('touchstart', onPointerDown, { passive: false });
+    dom.addEventListener('touchmove', onPointerMove, { passive: false });
+    dom.addEventListener('touchend', onPointerUp);
+    window.addEventListener('resize', onWindowResize);
+    animate();
+  }
+
+  function getClientCoordinates(e) {
+    if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
+  function onPointerDown(e) {
+    isDragging = true;
+    const c = getClientCoordinates(e);
+    previousMousePosition = { x: c.x, y: c.y };
+    rotationVelocityY = 0; rotationVelocityX = 0;
+    if (e.type === 'touchstart') e.preventDefault();
+  }
+  function onPointerMove(e) {
+    if (!isDragging) return;
+    const c = getClientCoordinates(e);
+    rotationVelocityY = (c.x - previousMousePosition.x) * 0.005;
+    rotationVelocityX = (c.y - previousMousePosition.y) * 0.005;
+    targetRotationY += rotationVelocityY;
+    targetRotationX += rotationVelocityX;
+    targetRotationX = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, targetRotationX));
+    previousMousePosition = { x: c.x, y: c.y };
+    if (e.type === 'touchmove') e.preventDefault();
+  }
+  function onPointerUp() { isDragging = false; }
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+  function animate() {
+    requestAnimationFrame(animate);
+    if (!isDragging) {
+      rotationVelocityY *= 0.95; rotationVelocityX *= 0.95;
+      targetRotationY += rotationVelocityY; targetRotationX += rotationVelocityX;
+      if (Math.abs(rotationVelocityY) < 0.0001) targetRotationY += 0.003;
+    }
+    if (car) { car.rotation.y = targetRotationY; car.rotation.x = targetRotationX; }
+    renderer.render(scene, camera);
+  }
+
+  init();
+</script>
+</body>
+</html>
