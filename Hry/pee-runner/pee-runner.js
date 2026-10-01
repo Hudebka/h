@@ -1,4 +1,4 @@
-async function spustitNejnovejsiPeeRunner(slozce = '') {
+async function spustitNejnovejsiPeeRunner(slozce = 'Hry/pee-runner/') {
     let cislo = 0;
     let posledniFunkcni = null;
     let poctuNeexistujicichVRade = 0;
