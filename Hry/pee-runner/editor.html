@@ -176,7 +176,50 @@
   <div class="toast" id="toast">Uloženo</div>
 
 <script>
+async function najdiNejnovejsiHru() {
+    let cislo = 0;
+    let posledniFunkcni = "pee-runner-3.html"; // záloha kdyby nic
+    let poctuNeexistujicichVRade = 0;
+    
+    while (true) {
+        let cisloStr = String(cislo).padStart(3, '0');
+        let cesta = `pee-runner_${cisloStr}.html`; 
+        
+        try {
+            let response = await fetch(cesta, { method: 'HEAD' });
+            if (response.ok) {
+                posledniFunkcni = cesta;
+                poctuNeexistujicichVRade = 0;
+                cislo++;
+            } else {
+                poctuNeexistujicichVRade++;
+                cislo++;
+                if (poctuNeexistujicichVRade >= 3) break;
+            }
+        } catch (error) {
+            break;
+        }
+    }
+    return posledniFunkcni;
+}
 
+async function spustitTestVEditoru() {
+    const frame = document.getElementById('gameFrame');
+    const warn = document.getElementById('frameWarn');
+    const panel = document.getElementById('testPanel');
+    
+    panel.classList.add('show');
+    warn.style.display = 'none';
+
+    // Zeptáme se našeho systému na nejnovější verzi
+    const nejnov_hra = await najdiNejnovejsiHru();
+    
+    let url = nejnov_hra + '?testSegment=' + encodeURIComponent(out.value);
+    if(document.getElementById('ghostChk').checked) url += '&ghost=1';
+    
+    frame.src = url;
+                    }
+  
 (function(){
   // Modely aut (musí odpovídat tabulce CAR_MODELS ve hře). Výchozí = policejní sedan.
   const CARS = [
