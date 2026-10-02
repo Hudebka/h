@@ -2,7 +2,7 @@ async function spustitNejnovejsiPeeRunner() {
     let cislo = 0;
     let posledniFunkcni = null;
     let poctuNeexistujicichVRade = 0;
-    const maxPrazdnychPokusu = 3; 
+    const maxPrazdnychPokusu = 5; 
 
     while (true) {
         let cisloStr = String(cislo).padStart(3, '0');
