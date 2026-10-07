@@ -1,5 +1,5 @@
 const PISNICKY = [
-    "valecna.txt"
+    "valecna.txt",
     "Bílá vdova.txt"
 ];
 
