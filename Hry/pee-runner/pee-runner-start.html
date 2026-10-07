@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Pee Runner 3D</title>
+<style>
+  html,body{ height:100%; margin:0; background:#05060c; font-family:'Segoe UI',Arial,sans-serif; -webkit-user-select:none; user-select:none; }
+  /* Stejný vzhled jako loading obrazovka ve hře, ať přechod mezi stránkami není vidět. */
+  #loading{ position:fixed; inset:0; background:#05060c; color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:20px; }
+  #loading h2{ margin:0; font-size:26px; font-weight:900; font-style:italic; letter-spacing:1px; color:#39ff6a; }
+  #loadSpin{ width:42px; height:42px; border:5px solid rgba(255,255,255,.18); border-top-color:#39ff6a; border-radius:50%; animation:loadSpin .9s linear infinite; }
+  @keyframes loadSpin{ to{ transform:rotate(360deg); } }
+  #loadBarWrap{ width:min(70%,240px); height:6px; border-radius:3px; background:rgba(255,255,255,.15); overflow:hidden; }
+  #loadBar{ width:4%; height:100%; background:linear-gradient(90deg,#39ff6a,#1fbf50); transition:width .2s ease; }
+  #loadMsg{ font-size:14px; opacity:.8; max-width:320px; line-height:1.4; }
+  .btns{ display:none; gap:10px; flex-wrap:wrap; justify-content:center; }
+  .btn{ font:inherit; font-weight:800; font-size:15px; border:none; border-radius:30px; padding:10px 20px; cursor:pointer; text-decoration:none; }
+  #retry{ background:linear-gradient(135deg,#39ff6a,#1fbf50); color:#0a0a0a; box-shadow:0 4px 0 #0d7a2c; }
+  #back{ background:rgba(20,20,26,.75); color:#fff; border:1px solid rgba(255,255,255,.3); }
+  #loading.err #loadSpin{ display:none; }
+  #loading.err .btns{ display:flex; }
+</style>
+</head>
+<body>
+<div id="loading">
+  <h2>PEE RUNNER 3D</h2>
+  <div id="loadSpin"></div>
+  <div id="loadBarWrap"><div id="loadBar"></div></div>
+  <div id="loadMsg">Hledám nejnovější verzi…</div>
+  <div class="btns">
+    <button id="retry" class="btn">ZKUSIT ZNOVU</button>
+    <a id="back" class="btn" href="https://hudebka.github.io/web/">← ZPĚT NA WEB</a>
+  </div>
+</div>
+<script>
+(function(){
+  // ---- NASTAVENÍ ----
+  // Cesty jsou relativní k téhle stránce: soubor patří vedle složky Hry/ (tj. do kořene webu).
+  const FOLDER = 'Hry/pee-runner/', PREFIX = 'pee-runner_', EXT = '.html';
+  const MAX_EMPTY = 5;        // kolik čísel v řadě smí chybět, než hledání skončí (po nalezení první verze)
+  const MAX_START_SCAN = 100; // dokud se nenajde žádná verze, hledá se až do tohoto čísla (mezery se netrestají)
+  const MAX_NUM = 999;
+  const BATCH = 8;            // kolik souborů se ověřuje najednou (rychlejší než po jednom, výsledek stejný)
+
+  const loading = document.getElementById('loading'), bar = document.getElementById('loadBar'), msg = document.getElementById('loadMsg');
+  const urlFor = n => FOLDER + PREFIX + String(n).padStart(3, '0') + EXT;
+  const setP = p => { bar.style.width = Math.round(Math.max(4, Math.min(100, p*100))) + '%'; };
+
+  // 1 = existuje, 0 = neexistuje, -1 = chyba sítě
+  async function exists(n){
+    try{ const r = await fetch(urlFor(n), { method:'HEAD', cache:'no-store' }); return r.ok ? 1 : 0; }
+    catch(e){ return -1; }
+  }
+
+  async function findLatest(){
+    let n = 0, last = null, miss = 0, netErr = false;
+    outer: while(n <= MAX_NUM){
+      if(last === null && n >= MAX_START_SCAN) break;
+      const nums = Array.from({length:BATCH}, (_,i)=>n+i).filter(x=>x<=MAX_NUM);
+      const res = await Promise.all(nums.map(exists));
+      for(let i=0;i<nums.length;i++){
+        if(res[i] === -1){ netErr = true; break outer; }
+        if(res[i] === 1){ last = nums[i]; miss = 0; }
+        else { miss++; if(last !== null && miss >= MAX_EMPTY) break outer; }
+      }
+      n += BATCH;
+      setP(0.05 + 0.25*(1 - Math.exp(-n/40)));
+    }
+    return { last, netErr };
+  }
+
+  async function start(){
+    loading.classList.remove('err');
+    msg.textContent = 'Hledám nejnovější verzi…';
+    setP(0.04);
+    const { last, netErr } = await findLatest();
+    if(last === null){
+      loading.classList.add('err');
+      msg.textContent = netErr ? 'Nepodařilo se spojit se serverem. Zkontroluj připojení.' : 'Žádná platná verze hry nebyla nalezena.';
+      return;
+    }
+    msg.textContent = 'Spouštím hru…';
+    setP(0.3);
+    try{ sessionStorage.setItem('prLoadP', '0.3'); }catch(e){}   // loading ve hře naváže na tuhle hodnotu
+    location.replace(urlFor(last));   // replace: tlačítko Zpět pak nevrací na tuhle stránku (jinak by hráče hned přesměrovala znovu)
+  }
+  document.getElementById('retry').addEventListener('click', start);
+  start();
+})();
+</script>
+</body>
+</html>
