@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="cs">
+
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Zpěvník – Hudebka</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #111;
+    color: #eee;
+}
+
+.horni-lista {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 15px 20px;
+    background: rgba(15,15,15,.95);
+    border-bottom: 1px solid #333;
+}
+
+.horni-lista a {
+    color: #ccc;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.horni-lista a:hover {
+    color: white;
+}
+
+main {
+    max-width: 900px;
+    margin: auto;
+    padding: 50px 20px 80px;
+}
+
+h1 {
+    font-size: 38px;
+    margin: 0 0 25px;
+}
+
+#hledat {
+    width: 100%;
+    padding: 14px 20px;
+    font-size: 17px;
+    color: #eee;
+    background: #1c1c1c;
+    border: 1px solid #333;
+    border-radius: 30px;
+    outline: none;
+    margin-bottom: 10px;
+}
+
+#hledat:focus {
+    border-color: #e63946;
+}
+
+#pocet {
+    color: #777;
+    font-size: 14px;
+    margin: 0 0 20px 20px;
+}
+
+.pisnicky-seznam {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.pisnicka {
+    background: #1c1c1c;
+    border: 1px solid #333;
+    border-radius: 12px;
+    transition: .2s;
+}
+
+.pisnicka:hover,
+.pisnicka.otevrena {
+    border-color: #e63946;
+}
+
+.pisnicka-radek {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 10px 18px;
+}
+
+.nazev {
+    font-weight: bold;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.autor {
+    color: #999;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.button {
+    display: inline-block;
+    padding: 7px 18px;
+    font-size: 14px;
+    border: none;
+    border-radius: 30px;
+    background: #e63946;
+    color: white;
+    text-decoration: none;
+    font-weight: bold;
+    cursor: pointer;
+    transition: .2s;
+}
+
+.button:hover {
+    transform: scale(1.05);
+    background: #ff4d5a;
+}
+
+.text-pisne {
+    display: none;
+    margin: 0;
+    padding: 5px 22px 22px;
+    font-family: "Courier New", monospace;
+    font-size: 16px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    color: #ddd;
+}
+
+.pisnicka.otevrena .text-pisne {
+    display: block;
+}
+
+.prazdno {
+    color: #888;
+    padding: 20px;
+    text-align: center;
+}
+
+</style>
+
+</head>
+
+
+<body>
+
+<div class="horni-lista">
+    <a href="index.html">← Zpět na Hudebku</a>
+</div>
+
+<main>
+
+    <h1>📖 Zpěvník</h1>
+
+    <input type="search" id="hledat" placeholder="Hledat podle názvu, autora nebo textu…" autocomplete="off">
+    <p id="pocet"></p>
+
+    <div id="seznam" class="pisnicky-seznam"></div>
+
+</main>
+
+
+<script src="pisnicky.js"></script>
+
+<script>
+
+function nactiPisnicky() {
+    let zdroj = [];
+    try {
+        if (typeof pisnicky !== "undefined") zdroj = pisnicky;
+        else if (typeof PISNICKY !== "undefined") zdroj = PISNICKY;
+        else if (typeof songs !== "undefined") zdroj = songs;
+    } catch (e) {}
+
+    if (!Array.isArray(zdroj)) zdroj = Object.values(zdroj || {});
+
+    return zdroj.map((p, i) => ({
+        id: i,
+        nazev: p.nazev || p.title || p.name || "Bez názvu",
+        autor: p.autor || p.interpret || p.author || p.artist || "",
+        text: p.text || p.lyrics || p.obsah || p.zpevnik || ""
+    }));
+}
+
+// hledání bez ohledu na diakritiku a velikost písmen
+const normalizuj = t => (t || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+const pisnicky_vsechny = nactiPisnicky()
+    .sort((a, b) => a.nazev.localeCompare(b.nazev, "cs"));
+
+pisnicky_vsechny.forEach(p => {
+    p.hledani = normalizuj(p.nazev + " " + p.autor + " " + p.text);
+});
+
+const seznam = document.getElementById("seznam");
+const pocet = document.getElementById("pocet");
+const hledat = document.getElementById("hledat");
+
+const prvky = new Map();   // id -> element písničky
+
+function vytvorPisnicku(p) {
+
+    const box = document.createElement("div");
+    box.className = "pisnicka";
+
+    const radek = document.createElement("div");
+    radek.className = "pisnicka-radek";
+
+    const nazev = document.createElement("span");
+    nazev.className = "nazev";
+    nazev.textContent = p.nazev;
+
+    const autor = document.createElement("span");
+    autor.className = "autor";
+    autor.textContent = p.autor;
+
+    const tlacitko = document.createElement("button");
+    tlacitko.className = "button";
+    tlacitko.textContent = "Zobrazit";
+
+    const text = document.createElement("pre");
+    text.className = "text-pisne";
+    text.textContent = p.text || "(text zatím chybí)";
+
+    const prepni = () => {
+        const otevrena = box.classList.toggle("otevrena");
+        tlacitko.textContent = otevrena ? "Skrýt" : "Zobrazit";
+    };
+
+    tlacitko.addEventListener("click", prepni);
+    radek.addEventListener("click", e => {
+        if (e.target !== tlacitko) prepni();
+    });
+    radek.style.cursor = "pointer";
+
+    radek.append(nazev, autor, tlacitko);
+    box.append(radek, text);
+
+    return box;
+}
+
+pisnicky_vsechny.forEach(p => prvky.set(p.id, vytvorPisnicku(p)));
+
+function vykresli() {
+
+    const dotaz = normalizuj(hledat.value.trim());
+    const slova = dotaz.split(/\s+/).filter(Boolean);
+
+    seznam.innerHTML = "";
+
+    const nalezene = pisnicky_vsechny.filter(p =>
+        slova.every(s => p.hledani.includes(s))
+    );
+
+    nalezene.forEach(p => seznam.appendChild(prvky.get(p.id)));
+
+    if (!pisnicky_vsechny.length) {
+        seznam.innerHTML = '<div class="prazdno">Zatím tu nejsou žádné písničky.</div>';
+        pocet.textContent = "";
+        return;
+    }
+
+    if (!nalezene.length) {
+        seznam.innerHTML = '<div class="prazdno">Nic jsme nenašli.</div>';
+    }
+
+    pocet.textContent = dotaz
+        ? `Nalezeno: ${nalezene.length} z ${pisnicky_vsechny.length}`
+        : `Písniček: ${pisnicky_vsechny.length}`;
+}
+
+hledat.addEventListener("input", vykresli);
+
+vykresli();
+
+// otevření konkrétní písničky z hlavní stránky (zpevnik.html?pisen=ID)
+const idZUrl = new URLSearchParams(location.search).get("pisen");
+
+if (idZUrl !== null && prvky.has(Number(idZUrl))) {
+    const box = prvky.get(Number(idZUrl));
+    box.classList.add("otevrena");
+    box.querySelector("button").textContent = "Skrýt";
+    box.scrollIntoView({ block: "center" });
+}
+
+</script>
+
+</body>
+</html>
