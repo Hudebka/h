@@ -4,7 +4,6 @@ const PISNICKY = [
     "Paramo, Semtín, pervitin.txt",
     "Muži s panáky.txt",
     "Opilecká aneb jen tři rumy.txt",
-    "Paramo, Semtín, pervitin.txt",
     "Zase na dluh.txt",
     "valecna.txt"
 ];
