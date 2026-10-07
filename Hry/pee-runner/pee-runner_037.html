@@ -3585,9 +3585,9 @@ window.addEventListener('error', function(e){
 
   let running=false;
   // ===== RYCHLOST HRY – tady si ji nastavuješ =====
-  const START_SPEED   = 25;    // rychlost na začátku (jednotky/s)
+  const START_SPEED   = 18;    // rychlost na začátku (jednotky/s)
   const MAX_SPEED     = 45;    // strop, kam se hra časem rozjede
-  const SPEED_ACCEL   = 0.25;  // o kolik se cílová rychlost zvyšuje za sekundu (0.25 ≈ cca 72 s do stropu)
+  const SPEED_ACCEL   = 0.15;  // o kolik se cílová rychlost zvyšuje za sekundu (0.25 ≈ cca 72 s do stropu)
   const SPEED_RECOVER = 8;     // jak rychle se rychlost vrací na cílovou po uklouznutí/zastavení
   let baseSpeed = START_SPEED; // cílová rychlost (roste s časem)
   let moveSpeed, dist, score, coinScore, bottleScore, spawnCursorZ, lastSegmentId;
