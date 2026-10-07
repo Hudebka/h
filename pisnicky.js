@@ -1,6 +1,7 @@
 const PISNICKY = [
     "valecna.txt",
-    "Bílá vdova.txt"
+    "Bílá vdova.txt",
+    "Paramo, Semtín, pervitin.txt"
 ];
 
 
