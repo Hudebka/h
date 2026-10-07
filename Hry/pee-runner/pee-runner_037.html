@@ -312,7 +312,7 @@ window.addEventListener('error', function(e){
 
   // SEGMENT "ZASTÁVKA": tříproudá silnice, jediná věc v ní je policejní auto stojící v pravém pruhu
   // (zády k hráči). Mezi běžné segmenty se vkládá s pravděpodobností PEE_STOP_CHANCE (nikdy dvakrát za sebou).
-  const PEE_STOP_CHANCE = 0.3;
+  const PEE_STOP_CHANCE = 0.03;
   const PEE_STOP_SEG = { id:'pee-stop', name:'Policejní auto (zastávka)', length:24, lanes:3, peeStop:true,
     items:[ { type:'car', lane:2, z:12, model:'sedan_police', flipped:true } ] };
   let lastWasPeeStop = false;
@@ -3585,8 +3585,8 @@ window.addEventListener('error', function(e){
 
   let running=false;
   // ===== RYCHLOST HRY – tady si ji nastavuješ =====
-  const START_SPEED   = 14;    // rychlost na začátku (jednotky/s)
-  const MAX_SPEED     = 32;    // strop, kam se hra časem rozjede
+  const START_SPEED   = 25;    // rychlost na začátku (jednotky/s)
+  const MAX_SPEED     = 45;    // strop, kam se hra časem rozjede
   const SPEED_ACCEL   = 0.25;  // o kolik se cílová rychlost zvyšuje za sekundu (0.25 ≈ cca 72 s do stropu)
   const SPEED_RECOVER = 8;     // jak rychle se rychlost vrací na cílovou po uklouznutí/zastavení
   let baseSpeed = START_SPEED; // cílová rychlost (roste s časem)
