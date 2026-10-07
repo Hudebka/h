@@ -4657,7 +4657,7 @@ window.addEventListener('error', function(e){
     T += dt;
 
     moveSpeed += dt*3;
-    if(moveSpeed>30) moveSpeed=30;
+    if(moveSpeed>20) moveSpeed=20;
 
     if(slipping){ const k = Math.max(0, 1 - slipT/slipSlideDur); moveSpeed = slipV0*k*k; }   // svět při uklouznutí brzdí do zastavení
     dist += moveSpeed*dt;
