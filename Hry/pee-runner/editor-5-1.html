@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Pee Runner — Editor segmentů</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#15181d; --panel2:#1c2027; --line:#2a2f38;
+    --txt:#eef0f2; --sub:#8b93a1; --accent:#39ff6a; --accent-d:#1fbf50;
+    --coin:#ffd83d; --bottle:#2e7d32; --puddle:#3aa0e0; --car:#e05a3a; --carf:#a83aca; --arrow:#d9dde3;
+    --n:3;
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+    box-sizing:border-box;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0; background:var(--bg); color:var(--txt); font-family:'Segoe UI',Arial,sans-serif; -webkit-user-select:none; user-select:none;}
+  body{padding:14px 14px 40px; max-width:720px; margin:0 auto;}
+  h1{font-size:19px; margin:4px 0 2px;}
+  .sub{color:var(--sub); font-size:12.5px; margin:0 0 16px; line-height:1.5;}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:14px;}
+  .row{display:flex; gap:10px; flex-wrap:wrap;}
+  .field{display:flex; flex-direction:column; gap:4px; flex:1 1 100px;}
+  .field label{font-size:11.5px; color:var(--sub); font-weight:600; text-transform:uppercase; letter-spacing:.03em;}
+  select{
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px; color:var(--txt);
+    padding:9px 10px; font-size:15px; width:100%;
+  }
+  input[type=text], input[type=number]{
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px; color:var(--txt);
+    padding:9px 10px; font-size:15px; width:100%; -webkit-user-select:text; user-select:text;
+  }
+  .lanesel{display:flex; gap:6px;}
+  .lanesel button{flex:1 1 0; padding:9px 0; background:var(--panel2); color:var(--txt); border:1px solid var(--line); border-radius:8px; font-size:15px;}
+  .lanesel button.on{border-color:var(--accent); box-shadow:0 0 0 2px var(--accent) inset; color:#fff;}
+  .legend{display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;}
+  .chip{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--sub); background:var(--panel2); border:1px solid var(--line); border-radius:20px; padding:5px 10px 5px 6px;}
+  .chip.pick{cursor:pointer; color:var(--txt); padding:8px 12px 8px 8px; font-size:13px;}
+  .chip.sel{border-color:var(--accent); box-shadow:0 0 0 2px var(--accent) inset; color:#fff;}
+  .pgroup{flex-basis:100%; font-size:11.5px; font-weight:700; color:var(--sub); margin-top:4px;}
+  .dot{width:14px; height:14px; border-radius:4px; flex:none;}
+  .lanehead{display:grid; grid-template-columns:52px repeat(var(--n),1fr); gap:6px; margin:14px 0 6px; font-size:11.5px; color:var(--sub); font-weight:700; text-align:center;}
+  .grid{display:flex; flex-direction:column; gap:6px; max-height:52vh; overflow-y:auto; padding:2px; border-radius:10px;}
+  .gridrow{display:grid; grid-template-columns:52px repeat(var(--n),1fr); gap:6px; align-items:stretch;}
+  .zlabel{display:flex; align-items:center; justify-content:center; font-size:12px; color:var(--sub); font-variant-numeric:tabular-nums;}
+  .cell{
+    position:relative; height:52px; border-radius:10px; border:1px solid var(--line); background:var(--panel2);
+    display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800; color:#0a0a0a;
+    cursor:pointer; transition:transform .08s ease; overflow:hidden; text-align:center; min-width:0;
+  }
+  .cell:active{transform:scale(0.94);}
+  .cell.t-empty{background:var(--panel2); color:var(--sub); font-weight:600;}
+  .cell.t-coin{background:var(--coin);}
+  .cell.t-bottle{background:var(--bottle); color:#eafff0;}
+  .cell.t-puddle{background:var(--puddle); color:#eafbff;}
+  .cell.t-car{background:var(--car); color:#fff0ea;}
+  .cell.t-car_flipped{background:var(--carf); color:#fbeaff;}
+  .cell.t-arrow_left, .cell.t-arrow_right{background:var(--arrow); color:#14161a; font-size:24px;}
+  .cell.band{box-shadow:0 0 0 1px #5a4a22 inset;}
+  .cell .flip-badge{position:absolute; top:3px; right:5px; font-size:10px;}
+  .cell .model-badge{position:absolute; top:3px; left:5px; font-size:10px;}
+  .grid[data-n="4"] .cell{font-size:9.5px;}
+  .grid[data-n="5"] .cell{font-size:8px; letter-spacing:-.02em;}
+  .grid[data-n="4"] .cell .flip-badge, .grid[data-n="4"] .cell .model-badge,
+  .grid[data-n="5"] .cell .flip-badge, .grid[data-n="5"] .cell .model-badge{font-size:8px; top:2px;}
+  .grid[data-n="5"] .cell.t-arrow_left, .grid[data-n="5"] .cell.t-arrow_right{font-size:20px;}
+  .grid.collect .cell.t-car, .grid.collect .cell.t-car_flipped, .grid.collect .cell.t-puddle,
+  .grid.collect .cell.t-arrow_left, .grid.collect .cell.t-arrow_right{background:#33363d; color:#767b86;}
+  .coll{position:absolute; left:2px; right:2px; bottom:2px; display:flex; flex-wrap:wrap; gap:2px; justify-content:center; pointer-events:none;}
+  .coll span{font-size:9px; line-height:1; padding:2px 3px; border-radius:4px; font-weight:800;}
+  .coll .c{background:var(--coin); color:#1a1200;}
+  .coll .b{background:var(--bottle); color:#eafff0;}
+  .grid[data-n="5"] .coll span{font-size:7.5px; padding:1px 2px;}
+  .hpanel{display:none; margin-top:12px; padding:10px; border:1px solid var(--line); border-radius:12px; background:var(--panel2);}
+  .hpanel.show{display:block;}
+  .hpanel h3{margin:0 0 8px; font-size:12.5px; color:var(--txt);}
+  .hgrid{display:grid; grid-template-columns:repeat(4,1fr); gap:6px;}
+  .hbtn{display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 2px; background:var(--panel); color:var(--txt); border:1px solid var(--line); border-radius:8px; font-size:15px; font-weight:800;}
+  .hbtn small{font-size:9.5px; font-weight:600; color:var(--sub); text-align:center; line-height:1.2; min-height:11px;}
+  .hbtn.sel{border-color:var(--accent); box-shadow:0 0 0 2px var(--accent) inset;}
+  .carnote{font-size:12px; color:var(--sub); line-height:1.5; margin:6px 0 0;}
+  .toolbar{display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;}
+  button{
+    font-family:inherit; font-weight:800; font-size:14px; border:none; border-radius:10px;
+    padding:11px 16px; cursor:pointer;
+  }
+  .btn-main{background:linear-gradient(135deg,var(--accent),var(--accent-d)); color:#0a0a0a; flex:1 1 160px;}
+  .btn-ghost{background:var(--panel2); color:var(--txt); border:1px solid var(--line); flex:1 1 120px;}
+  .btn-danger{background:#3a1418; color:#ff9a9a; border:1px solid #5a2228; flex:1 1 120px;}
+  textarea{
+    width:100%; min-height:220px; background:#0e1012; color:#9be89b; font:12px/1.5 'Consolas',monospace;
+    border:1px solid var(--line); border-radius:10px; padding:10px; -webkit-user-select:text; user-select:text;
+  }
+  .out-head{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;}
+  .out-head h2{font-size:14px; margin:0;}
+  .hint{font-size:12px; color:var(--sub); margin-top:8px; line-height:1.5;}
+  .toast{
+    position:fixed; left:50%; bottom:22px; transform:translate(-50%,12px); background:var(--accent); color:#0a0a0a;
+    font-weight:800; font-size:13px; padding:10px 18px; border-radius:24px; opacity:0; pointer-events:none;
+    transition:opacity .18s ease, transform .18s ease; z-index:9;
+  }
+  .toast.show{opacity:1; transform:translate(-50%,0);}
+  .toast{max-width:88vw; text-align:center;}
+  .chk{display:flex; align-items:center; gap:7px; font-size:13px; color:var(--txt);}
+  .chk input{width:18px; height:18px; accent-color:var(--accent);}
+  .testpanel{display:none;}
+  .testpanel.show{display:block;}
+  .testbar{display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin:10px 0;}
+  .btn-small{padding:8px 12px; font-size:13px; flex:0 0 auto;}
+  #gameFrame{width:100%; height:66vh; min-height:400px; border:1px solid var(--line); border-radius:12px; background:#000; display:block;}
+  .framewarn{display:none; margin-top:10px; padding:10px 12px; border-radius:10px; background:#3a2a14; border:1px solid #5a4222; color:#ffcf8a; font-size:12.5px; line-height:1.5;}
+  code{background:var(--panel2); padding:1px 6px; border-radius:5px; font-size:12.5px;}
+</style>
+</head>
+<body>
+  <h1>🎛️ Editor segmentů — Pee Runner</h1>
+  <p class="sub">Poskládej jeden úsek trati (segment) přesně podle sebe, hned si ho <b>vyzkoušej přímo ve hře</b>,
+    případně <b>nahraj hotový</b> <code>segment_XXXX.js</code> a uprav ho. Hotový segment exportuj jako <code>.js</code>
+    a ulož do složky <code>segments/</code> vedle hry.</p>
+
+  <div class="panel">
+    <div class="row">
+      <div class="field">
+        <label>Číslo segmentu</label>
+        <input type="number" id="segId" min="1" max="9999" value="1">
+      </div>
+      <div class="field" style="flex:2 1 200px">
+        <label>Název (jen pro tebe, do hry se nepromítá)</label>
+        <input type="text" id="segName" placeholder="např. Dvě auta vedle sebe">
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="field">
+        <label>Délka segmentu</label>
+        <input type="number" id="segLen" min="8" step="1" value="24">
+      </div>
+      <div class="field">
+        <label>Krok mřížky</label>
+        <input type="number" id="segStep" min="1" step="1" value="4">
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="field" style="flex:1 1 100%">
+        <label>Počet pruhů</label>
+        <div class="lanesel" id="laneSel"></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="field" style="flex:1 1 100%">
+        <label>Zarovnání silnice při změně počtu pruhů</label>
+        <select id="segAlign">
+          <option value="">Automaticky (sudý rozdíl = střed, lichý = přikloní se k jedné straně)</option>
+          <option value="center">Na střed (při lichém rozdílu o půl pruhu)</option>
+          <option value="left">Drží levý okraj (silnice se zužuje / rozšiřuje na pravé straně)</option>
+          <option value="right">Drží pravý okraj (silnice se zužuje / rozšiřuje na levé straně)</option>
+        </select>
+        <div class="hint" id="alignHint" style="margin-top:4px"></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="field" style="flex:1 1 100%">
+        <label>Prostředí</label>
+        <select id="segBiome">
+          <option value="">Automaticky (střídá se samo po úsecích)</option>
+          <option value="city">Město</option>
+          <option value="forest">Les</option>
+          <option value="bridge">Most</option>
+          <option value="industry">Průmysl</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="gridPanel">
+    <div class="toolbar" style="margin:0 0 4px">
+      <button class="btn-ghost" id="btnLoad">📂 Nahrát hotový segment (.js)</button>
+      <input type="file" id="fileInput" accept=".js,text/javascript,application/javascript,text/plain" style="display:none">
+    </div>
+    <div class="legend" id="palette"></div>
+    <p class="carnote" id="carNote"></p>
+    <div class="hpanel" id="hPanel"></div>
+    <div class="lanehead" id="laneHead"></div>
+    <div class="grid" id="grid"></div>
+    <p class="hint">Vyber v legendě nahoře, co chceš vkládat (louži, auto, šipku odbočky nebo gumu) a klepej do mapy.
+      <b>Mince a lahváče</b> se vkládají zvlášť: vyber „Mince“ / „Lahev“, auta zešednou, vyber výšku v tabulce a klepej do stejných polí jako auta.
+      Do jednoho pole jde dát víc položek v různých výškách. Klepnutí na totéž (stejný druh + výška) ho smaže.
+      Řádek nahoře = první věc, na kterou hráč v segmentu narazí.</p>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn-main" id="btnTest">▶ Vyzkoušet ve hře</button>
+  </div>
+  <div class="toolbar" style="margin-top:10px">
+    <button class="btn-main" id="btnExport">⬇️ Exportovat segment_XXXX.js</button>
+    <button class="btn-ghost" id="btnCopy">Kopírovat kód</button>
+    <button class="btn-danger" id="btnClear">Vymazat mřížku</button>
+  </div>
+
+  <div class="panel testpanel" id="testPanel" style="margin-top:14px">
+    <div class="out-head"><h2>Test ve hře</h2>
+      <div style="display:flex; gap:8px">
+        <button class="btn-ghost btn-small" id="btnBack">↑ K mřížce</button>
+        <button class="btn-danger btn-small" id="btnStop">■ Zavřít</button>
+      </div>
+    </div>
+    <div class="testbar">
+      <label class="chk"><input type="checkbox" id="ghostChk"> Bez nárazů (jen prohlídka)</label>
+      <label class="chk"><input type="checkbox" id="autoChk"> Po každé úpravě znovu spustit</label>
+    </div>
+    <iframe id="gameFrame" title="Pee Runner — test segmentu"></iframe>
+    <div class="framewarn" id="frameWarn">Hra se nenačetla. Zkontroluj, že soubor hry (pee-runner_NNN.html) leží ve stejné složce jako tenhle editor.</div>
+    <p class="hint">Běží pouze tenhle segment dokola (s mezerou mezi opakováními). Ovládání: šipky / mezerník, na telefonu swipe.
+      Test neukládá skóre ani se nezapisuje do žebříčku. Po nárazu klepni na obrazovku pro další pokus.
+      Editor si sám najde nejnovější verzi hry ve složce (pee-runner_000.html, _001, _002 ...).</p>
+  </div>
+
+  <div class="panel" style="margin-top:14px">
+    <div class="out-head"><h2>Náhled vygenerovaného souboru</h2></div>
+    <textarea id="out" readonly spellcheck="false"></textarea>
+    <p class="hint">
+      1) Klepni na <b>Exportovat</b> — stáhne se soubor pojmenovaný podle čísla segmentu (např. <code>segment_0003.js</code>).<br>
+      2) Přendej ho do složky <code>segments/</code>, která leží vedle HTML souboru hry.<br>
+      3) Hotovo — hra ho při dalším spuštění sama najde a zamíchá mezi ostatní segmenty. Nic jiného upravovat nemusíš,
+      ani při přidávání dalších nových segmentů (jen jim dej další volné číslo).
+    </p>
+  </div>
+
+  <div class="toast" id="toast">Uloženo</div>
+
+<script>
+(function(){
+  const MAX_LANES = 5;
+  const LANE_W = 2.3;
+
+  // Modely aut (musí odpovídat tabulce CAR_MODELS ve hře). Výchozí = policejní sedan.
+  const CARS = [
+    {id:'sedan_police', name:'Sedan',            short:'SEDAN',   police:true},
+    {id:'combi_police', name:'Combi',            short:'COMBI',   police:true},
+    {id:'van_police',   name:'Dodávka',          short:'DODÁVKA', police:true},
+    {id:'truck_police', name:'Kamion s návěsem', short:'KAMION',  police:true,  long:true},
+    {id:'sedan_civil',  name:'Sedan',            short:'SEDAN',   police:false},
+    {id:'combi_civil',  name:'Combi',            short:'COMBI',   police:false},
+    {id:'van_civil',    name:'Dodávka',          short:'DODÁVKA', police:false},
+    {id:'truck_civil',  name:'Kamion s návěsem', short:'KAMION',  police:false, long:true},
+    {id:'jeep_civil',   name:'Jeep',             short:'JEEP',    police:false},
+    {id:'sport_civil',  name:'Sporťák',          short:'SPORŤÁK', police:false},
+    {id:'ramp_civil',   name:'Kamion s rampou',  short:'RAMPA',   police:false, long:true}
+  ];
+  const DEFAULT_CAR = 'sedan_police';
+  const carById = id => CARS.find(c => c.id === id);
+
+  // Hodnota políčka: 'empty' | 'coin' | 'bottle' | 'puddle' | 'arrow_left' | 'arrow_right'
+  //                  | 'car:<model>' | 'carf:<model>' (otočené)
+  const isCar = v => v.indexOf('car:') === 0 || v.indexOf('carf:') === 0;
+  const isArrow = v => v === 'arrow_left' || v === 'arrow_right';
+  const carModelOf = v => v.slice(v.indexOf(':') + 1);
+  const carFlipped = v => v.indexOf('carf:') === 0;
+  const grid = document.getElementById('grid');
+  const laneHead = document.getElementById('laneHead');
+  const laneSel = document.getElementById('laneSel');
+  const segId = document.getElementById('segId');
+  const segName = document.getElementById('segName');
+  const segLen = document.getElementById('segLen');
+  const segStep = document.getElementById('segStep');
+  const segBiome = document.getElementById('segBiome');
+  const segAlign = document.getElementById('segAlign');
+  const alignHint = document.getElementById('alignHint');
+  const ALIGN_IDS = ['center','left','right'];
+  function updateAlignHint(){
+    const t = {
+      '': 'Platí vůči předchozímu segmentu. Například 4 → 2 pruhy: střed nechá po jednom pruhu na obou stranách, vlevo / vpravo zúží jen z jedné strany. U 3 → 2 vybere automatika stranu, která drží silnici blíž středu.',
+      center: 'Střed silnice zůstane tam, kde byl. U lichého rozdílu (3 → 2) se silnice zúží z obou stran o půl pruhu.',
+      left: 'Levý okraj zůstane rovný. Při zúžení se přibližuje pravý okraj (např. 3 → 2: dva pruhy vlevo), při rozšíření silnice přibude vpravo.',
+      right: 'Pravý okraj zůstane rovný. Při zúžení se přibližuje levý okraj, při rozšíření silnice přibude vlevo.'
+    };
+    alignHint.textContent = t[segAlign.value] || t[''];
+  }
+  const BIOME_IDS = ['city','forest','bridge','industry'];
+  const out = document.getElementById('out');
+  const toast = document.getElementById('toast');
+  const carNote = document.getElementById('carNote');
+  const palette = document.getElementById('palette');
+
+  let lanes = 3;                       // počet pruhů segmentu (1 až 5)
+  const emptyRow = () => new Array(MAX_LANES).fill('empty');
+  const emptyCollRow = () => Array.from({length:MAX_LANES}, () => []);
+  // Sbírané položky (mince, lahváče) leží ve vlastní vrstvě: coll[row][lane] = pole tokenů 'coin@1.5' / 'bottle@0' / 'coin@auto'.
+  // Výška h = výška, ve které musí být paty hráče, aby položka prošla jeho tělem (0 = země, max 5 = vrchol skoku z kamionu).
+  const HEIGHTS = []; for(let v=0; v<=5.0001; v+=0.5) HEIGHTS.push(Math.round(v*2)/2);
+  const H_NOTES = {0:'země', 1.5:'skok ze země', 3.5:'střecha kamionu', 5:'max (skok z kamionu)'};
+  const tok = (type, h) => type + '@' + (h === null ? 'auto' : String(h));
+  const tokType = t => t.slice(0, t.indexOf('@'));
+  const tokH = t => { const s = t.slice(t.indexOf('@')+1); return s === 'auto' ? null : Number(s); };
+  const fmtH = h => h === null ? 'A' : String(h);
+
+  // Štětec = to, co se vkládá po klepnutí do mapy (vybírá se v legendě).
+  const brush = { kind:'coin', model:DEFAULT_CAR, flip:false, h:0 };
+  const BASIC = [
+    {kind:'erase',  label:'Guma (vše v poli)',  color:'#3a3f52', mark:'✕'},
+    {kind:'puddle', label:'Louže', color:'var(--puddle)'}
+  ];
+  const COLLECT = [
+    {kind:'coin',       label:'Mince', color:'var(--coin)'},
+    {kind:'bottle',     label:'Lahev', color:'var(--bottle)'},
+    {kind:'erase_coll', label:'Guma sbíraných', color:'#3a3f52', mark:'✕'}
+  ];
+  const isColl = () => brush.kind === 'coin' || brush.kind === 'bottle' || brush.kind === 'erase_coll';
+  const ARROWS = [
+    {kind:'arrow_left',  label:'Šipka vlevo',  mark:'⬅'},
+    {kind:'arrow_right', label:'Šipka vpravo', mark:'➡'}
+  ];
+  function chip(label, color, mark, onClick){
+    const el = document.createElement('div');
+    el.className = 'chip pick'; el.setAttribute('role','button');
+    const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = color;
+    if(mark){ dot.style.display='flex'; dot.style.alignItems='center'; dot.style.justifyContent='center'; dot.style.fontSize='10px'; dot.textContent = mark; }
+    el.appendChild(dot); el.appendChild(document.createTextNode(label));
+    el.addEventListener('click', onClick);
+    return el;
+  }
+  function isSel(kind, model){ return brush.kind === kind && (kind !== 'car' || brush.model === model); }
+  function buildPalette(){
+    palette.innerHTML = '';
+    BASIC.forEach(b=>{
+      const el = chip(b.label, b.color, b.mark, ()=>{ brush.kind = b.kind; buildPalette(); });
+      if(isSel(b.kind)) el.classList.add('sel');
+      palette.appendChild(el);
+    });
+    const hc = document.createElement('div'); hc.className = 'pgroup'; hc.textContent = '🪙 Sbírání (mince, lahváče) — auta zešednou, výšku vybereš v tabulce'; palette.appendChild(hc);
+    COLLECT.forEach(b=>{
+      const el = chip(b.label, b.color, b.mark, ()=>{ brush.kind = b.kind; buildPalette(); });
+      if(isSel(b.kind)) el.classList.add('sel');
+      palette.appendChild(el);
+    });
+    const hr = document.createElement('div'); hr.className = 'pgroup'; hr.textContent = '🛣️ Křižovatky (odbočky)'; palette.appendChild(hr);
+    ARROWS.forEach(b=>{
+      const el = chip(b.label, 'var(--arrow)', b.mark, ()=>{ brush.kind = b.kind; buildPalette(); });
+      if(isSel(b.kind)) el.classList.add('sel');
+      palette.appendChild(el);
+    });
+    [['🚓 Policejní auta', true], ['🚗 Civilní auta (barva se ve hře losuje)', false]].forEach(([title, pol])=>{
+      const h = document.createElement('div'); h.className = 'pgroup'; h.textContent = title; palette.appendChild(h);
+      CARS.filter(c => c.police === pol).forEach(c=>{
+        const el = chip(c.name, pol ? 'var(--car)' : '#5b8def', null, ()=>{ brush.kind = 'car'; brush.model = c.id; buildPalette(); });
+        if(isSel('car', c.id)) el.classList.add('sel');
+        palette.appendChild(el);
+      });
+    });
+    const f = chip('↺ Otočené auto', 'var(--carf)', null, ()=>{ brush.flip = !brush.flip; buildPalette(); });
+    if(brush.flip) f.classList.add('sel');
+    f.style.marginTop = '4px';
+    palette.appendChild(f);
+    grid.classList.toggle('collect', isColl());
+    renderHeightPanel();
+    updateCarNote();
+  }
+  function renderHeightPanel(){
+    const p = document.getElementById('hPanel');
+    const on = brush.kind === 'coin' || brush.kind === 'bottle';
+    p.classList.toggle('show', on);
+    if(!on){ p.innerHTML = ''; return; }
+    p.innerHTML = '';
+    const h3 = document.createElement('h3');
+    h3.textContent = (brush.kind === 'coin' ? 'Mince' : 'Lahev') + ' — výška (v jednotkách světa)';
+    p.appendChild(h3);
+    const g = document.createElement('div'); g.className = 'hgrid';
+    HEIGHTS.forEach(v=>{
+      const b = document.createElement('button'); b.className = 'hbtn' + (brush.h === v ? ' sel' : '');
+      b.innerHTML = '<span>' + v + '</span><small>' + (H_NOTES[v] || '') + '</small>';
+      b.addEventListener('click', ()=>{ brush.h = v; renderHeightPanel(); });
+      g.appendChild(b);
+    });
+    p.appendChild(g);
+  }
+  const roadHalfW = n => (n*LANE_W + 0.7)/2;
+  function updateCarNote(){
+    if(isArrow(brush.kind)){
+      const half = roadHalfW(lanes).toFixed(1);
+      carNote.textContent = 'Odbočka: hráč odbočí jen když je v pruhu se šipkou a včas zmáčkne / swipne do směru odbočky (cca 1,5 s před šipkou až těsně po ní). Bez povelu jede rovně. Celá scéna se s ním otočí; silnice za zatáčkou se dokreslí sama a hra pokračuje dalšími segmenty. '
+        + 'Křižovatka je široká jako silnice, drž proto kolem šipky volno (zhruba ±' + half + ' jednotky) a šipku dej aspoň ' + half + ' od začátku segmentu. '
+        + 'Po odbočce s aspoň jedním lahváčem tam s pravděpodobností 50 % stojí policejní auto. Kdo do něj narazí zboku (přeřadí se do jeho pruhu, když je vedle něj), spustí cut scénu s močením: 0,5 s a 1 bod za každý lahváč, lahváče se vynulují, skóre zůstává. Zezadu = game over, objetí = hra pokračuje.';
+      return;
+    }
+    if(brush.kind === 'coin' || brush.kind === 'bottle'){
+      carNote.textContent = 'Hráč položku sebere jen když mu projde tělem: když ji podběhne nebo přeskočí, má smůlu. Výška 0 = na zemi (jako dosud), 1,5 = vrchol skoku ze země, 3,5 ≈ střecha kamionu, 5 = vrchol skoku z kamionu. Auta jsou zešedlá jen pro orientaci — položky se dávají do stejných polí.';
+      return;
+    }
+    if(brush.kind === 'erase_coll'){ carNote.textContent = 'Guma sbíraných: klepnutí smaže všechny mince a lahváče v poli (auta a louže zůstanou).'; return; }
+    if(brush.kind !== 'car'){
+      carNote.textContent = brush.kind === 'erase' ? 'Guma: klepnutí na políčko ho úplně vyprázdní (včetně mincí a lahváčů).' : '';
+      return;
+    }
+    const c = carById(brush.model);
+    let t = c.police ? 'Policejní vůz.' : 'Civilní vůz – barvu ve hře losuje, v editoru je jen orientační.';
+    t += ' Z podlahy se přes žádné auto přeskočit nedá.';
+    if(c.id === 'ramp_civil') t += ' Rampa míří k hráči: vyběhne po ní nahoru a může běžet po střechách. „Otočené“ = kabinou k hráči (stěna).';
+    else if(c.long) t += ' Dlouhé vozidlo (cca 6 jednotek, při kroku 4 zabere víc než jeden řádek). Jde po něm běhat, pokud se na něj hráč dostane z rampy.';
+    else t += ' Po střeše se dá běhat, jen když se na ni hráč dostane z rampy.';
+    carNote.textContent = t;
+  }
+  function brushValue(){
+    switch(brush.kind){
+      case 'erase':  return 'empty';
+      case 'car':    return (brush.flip ? 'carf:' : 'car:') + brush.model;
+      default:       return brush.kind;
+    }
+  }
+
+  // cells[row][lane] = hodnota políčka (viz výše); vždy 5 sloupců, používá se prvních `lanes`.
+  let cells = [];
+  let coll = [];
+
+  function rowCount(){
+    return Math.max(1, Math.floor(Number(segLen.value)/Number(segStep.value)) + 1);
+  }
+  function ensureCellsSize(){
+    const rows = rowCount();
+    while(cells.length < rows) cells.push(emptyRow());
+    cells.length = rows;
+    while(coll.length < rows) coll.push(emptyCollRow());
+    coll.length = rows;
+  }
+
+  function labelFor(type){
+    switch(type){
+      case 'puddle': return 'LOUŽE';
+      case 'arrow_left': return '⬅';
+      case 'arrow_right': return '➡';
+      default: return '';
+    }
+  }
+
+  function laneLabel(i){
+    if(lanes === 1) return 'pruh';
+    if(i === 0) return 'levý';
+    if(i === lanes-1) return 'pravý';
+    if(lanes % 2 === 1 && i === (lanes-1)/2) return 'střed';
+    return String(i+1);
+  }
+
+  // Řádky, na kterých by ležela křižovatka (šipka ± polovina šířky silnice) - jen jako vodítko.
+  function junctionRows(){
+    const set = new Set();
+    const step = Number(segStep.value) || 4, half = roadHalfW(lanes);
+    for(let r=0;r<cells.length;r++){
+      for(let l=0;l<lanes;l++){
+        if(isArrow(cells[r][l])){
+          for(let q=0;q<cells.length;q++) if(Math.abs(q*step - r*step) < half) set.add(q);
+        }
+      }
+    }
+    return set;
+  }
+
+  function renderLaneUi(){
+    document.documentElement.style.setProperty('--n', lanes);
+    grid.setAttribute('data-n', lanes);
+    laneHead.innerHTML = '';
+    const d0 = document.createElement('div'); d0.textContent = 'vzdál.'; laneHead.appendChild(d0);
+    for(let i=0;i<lanes;i++){ const d = document.createElement('div'); d.textContent = laneLabel(i); laneHead.appendChild(d); }
+    laneSel.innerHTML = '';
+    for(let n=1;n<=MAX_LANES;n++){
+      const b = document.createElement('button'); b.textContent = n;
+      if(n === lanes) b.className = 'on';
+      b.addEventListener('click', ()=>setLanes(n));
+      laneSel.appendChild(b);
+    }
+  }
+
+  // Změna počtu pruhů: obsah zůstane na stejném místě silnice (posun o půl rozdílu).
+  function setLanes(n){
+    if(n === lanes) return;
+    const shift = Math.trunc((n - lanes)/2);
+    let lost = 0;
+    cells = cells.map(row=>{
+      const nr = emptyRow();
+      for(let j=0;j<MAX_LANES;j++){
+        const v = row[j];
+        if(v === 'empty') continue;
+        const nj = j + shift;
+        if(j < lanes && nj >= 0 && nj < n) nr[nj] = v; else if(j < lanes) lost++;
+      }
+      return nr;
+    });
+    coll = coll.map(row=>{
+      const nr = emptyCollRow();
+      for(let j=0;j<MAX_LANES;j++){
+        const v = row[j];
+        if(!v.length) continue;
+        const nj = j + shift;
+        if(j < lanes && nj >= 0 && nj < n) nr[nj] = v; else if(j < lanes) lost += v.length;
+      }
+      return nr;
+    });
+    lanes = n;
+    buildPalette(); renderLaneUi(); renderGrid(); updateOutput();
+    if(lost) showToast('Počet pruhů: ' + n + ' — ' + lost + ' položek mimo silnici zmizelo', 3200);
+  }
+
+  function renderGrid(){
+    ensureCellsSize();
+    const rows = rowCount();
+    const jrows = junctionRows();
+    grid.innerHTML = '';
+    for(let r=0; r<rows; r++){
+      const z = Math.min(r*Number(segStep.value), Number(segLen.value));
+      const rowEl = document.createElement('div');
+      rowEl.className = 'gridrow';
+      const zEl = document.createElement('div');
+      zEl.className = 'zlabel';
+      zEl.textContent = z;
+      rowEl.appendChild(zEl);
+      for(let lane=0; lane<lanes; lane++){
+        const v = cells[r][lane];
+        const cellEl = document.createElement('div');
+        if(isCar(v)){
+          const c = carById(carModelOf(v)) || carById(DEFAULT_CAR);
+          cellEl.className = 'cell t-' + (carFlipped(v) ? 'car_flipped' : 'car');
+          cellEl.textContent = c.short;
+          const mb = document.createElement('span');
+          mb.className = 'model-badge'; mb.textContent = c.police ? '🚓' : '🚗';
+          cellEl.appendChild(mb);
+          if(carFlipped(v)){
+            const badge = document.createElement('span');
+            badge.className = 'flip-badge'; badge.textContent = '↺';
+            cellEl.appendChild(badge);
+          }
+        } else {
+          cellEl.className = 'cell t-' + v;
+          cellEl.textContent = labelFor(v);
+        }
+        const cl = coll[r][lane];
+        if(cl.length){
+          const box = document.createElement('div'); box.className = 'coll';
+          cl.slice().sort((a,b)=> (tokType(a) === tokType(b) ? (tokH(a)||0) - (tokH(b)||0) : (tokType(a) < tokType(b) ? 1 : -1))).forEach(t=>{
+            const s = document.createElement('span'); s.className = tokType(t) === 'coin' ? 'c' : 'b';
+            s.textContent = (tokType(t) === 'coin' ? '●' : '▮') + fmtH(tokH(t));
+            box.appendChild(s);
+          });
+          cellEl.appendChild(box);
+        }
+        if(jrows.has(r) && v === 'empty') cellEl.classList.add('band');
+        cellEl.addEventListener('click', ()=>{
+          if(brush.kind === 'erase_coll'){ coll[r][lane] = []; }
+          else if(isColl()){
+            const t = tok(brush.kind, brush.h), arr = coll[r][lane], i = arr.indexOf(t);
+            if(i >= 0) arr.splice(i, 1); else arr.push(t);        // totéž znovu = smazat
+          }
+          else if(brush.kind === 'erase'){ cells[r][lane] = 'empty'; coll[r][lane] = []; }
+          else {
+            const nv = brushValue();
+            cells[r][lane] = (cells[r][lane] === nv) ? 'empty' : nv;   // totéž znovu = smazat
+          }
+          renderGrid();
+          updateOutput();
+        });
+        rowEl.appendChild(cellEl);
+      }
+      grid.appendChild(rowEl);
+    }
+  }
+
+  function pad4(n){ return String(Math.max(1, Math.min(9999, Math.round(n||1)))).padStart(4,'0'); }
+
+  function jsEscape(str){ return String(str||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"'); }
+
+  function buildItems(){
+    const items = [];
+    const rows = rowCount();
+    for(let r=0; r<rows; r++){
+      const z = Math.min(r*Number(segStep.value), Number(segLen.value));
+      for(let lane=0; lane<lanes; lane++){
+        const v = cells[r][lane];
+        if(v==='empty') continue;
+        if(isCar(v)){
+          const it = {type:'car', lane, z};
+          const m = carModelOf(v);
+          if(m !== DEFAULT_CAR) it.model = m;
+          if(carFlipped(v)) it.flipped = true;
+          items.push(it);
+        } else {
+          items.push({type:v, lane, z});
+        }
+      }
+      for(let lane=0; lane<lanes; lane++){
+        coll[r][lane].forEach(t=>{ items.push({type:tokType(t), lane, z, h:tokH(t)}); });
+      }
+    }
+    return items;
+  }
+
+  function buildFileText(){
+    const id = pad4(segId.value);
+    const name = segName.value.trim();
+    const length = Math.max(8, Math.round(Number(segLen.value)||24));
+    const items = buildItems();
+    const itemLines = items.map(it=>{
+      const parts = [`type:"${it.type}"`, `lane:${it.lane}`, `z:${it.z}`];
+      if(typeof it.h === 'number') parts.push(`h:${it.h}`);
+      if(it.model) parts.push(`model:"${it.model}"`);
+      if(it.flipped) parts.push('flipped:true');
+      return '      { ' + parts.join(', ') + ' },';
+    }).join('\n');
+    return `// segment_${id}.js${name ? ' — ' + jsEscape(name) : ''}
+// Vygenerováno editorem segmentů Pee Runner. Stačí tenhle soubor uložit
+// do složky segments/ vedle hry - nic dalšího upravovat netřeba.
+(function(){
+  if(!window.PunkRunner || typeof window.PunkRunner.registerSegment !== 'function'){
+    console.warn('PunkRunner registr nenalezen - segment_${id}.js se nenačetl.');
+    return;
+  }
+  window.PunkRunner.registerSegment({
+    id: "${id}",
+    name: "${jsEscape(name)}",
+    length: ${length},
+    lanes: ${lanes},${segAlign.value ? '\n    align: "' + segAlign.value + '",' : ''}${segBiome.value ? '\n    biome: "' + segBiome.value + '",' : ''}
+    items: [
+${itemLines || '      // (segment je zatím prázdný)'}
+    ]
+  });
+})();
+`;
+  }
+
+  function updateOutput(){
+    out.value = buildFileText();
+    scheduleAuto();
+  }
+
+  function showToast(msg, ms){
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(()=>toast.classList.remove('show'), ms||1600);
+  }
+
+  function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+
+  document.getElementById('btnExport').addEventListener('click', ()=>{
+    updateOutput();
+    const id = pad4(segId.value);
+    const blob = new Blob([out.value], {type:'text/javascript'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'segment_' + id + '.js';
+    document.body.appendChild(a); a.click(); a.remove();
+    // Po exportu rovnou navrhni další volné číslo pro příští segment.
+    lsSet('pr_seg_next_id', String(Number(segId.value)+1));
+    showToast('Staženo: segment_' + id + '.js');
+  });
+
+  document.getElementById('btnCopy').addEventListener('click', async ()=>{
+    updateOutput();
+    try{ await navigator.clipboard.writeText(out.value); showToast('Kód zkopírován'); }
+    catch(e){ out.select(); document.execCommand('copy'); showToast('Kód zkopírován'); }
+  });
+
+  document.getElementById('btnClear').addEventListener('click', ()=>{
+    cells = cells.map(()=>emptyRow());
+    coll = coll.map(()=>emptyCollRow());
+    renderGrid();
+    updateOutput();
+  });
+
+  [segLen, segStep].forEach(el=>el.addEventListener('input', ()=>{ renderGrid(); updateOutput(); }));
+  [segId, segName].forEach(el=>el.addEventListener('input', updateOutput));
+  segBiome.addEventListener('change', updateOutput);
+  segAlign.addEventListener('change', ()=>{ updateAlignHint(); updateOutput(); });
+
+  // ================= NAČTENÍ HOTOVÉHO SEGMENTU ZE SOUBORU =================
+  const fileInput = document.getElementById('fileInput');
+  function gcd(a,b){ a=Math.abs(a); b=Math.abs(b); while(b){ const t=a%b; a=b; b=t; } return a; }
+
+  // Spustí obsah souboru s falešným window.PunkRunner a zachytí, co se zaregistruje.
+  function parseSegmentText(text){
+    let found = null;
+    const fakeWin = { PunkRunner:{ registerSegment:function(seg){ if(!found) found = seg; } } };
+    new Function('window', text)(fakeWin);
+    return found;
+  }
+
+  function applySegment(seg, fileName){
+    const OK = ['coin','bottle','puddle','car','arrow_left','arrow_right'];
+    let rounded = false, unknownModel = 0, outside = 0, snapped = 0;
+    const n = Math.max(1, Math.min(MAX_LANES, Math.round(Number(seg.lanes)||3)));
+    const items = (Array.isArray(seg.items) ? seg.items : [])
+      .filter(it => it && OK.indexOf(it.type) >= 0)
+      .map(it => {
+        const zRaw = Number(it.z)||0, z = Math.max(0, Math.round(zRaw));
+        if(z !== zRaw) rounded = true;
+        let model = DEFAULT_CAR;
+        if(it.type === 'car' && it.model){
+          if(carById(String(it.model))) model = String(it.model); else unknownModel++;
+        }
+        const laneRaw = Math.round(Number(it.lane)||0);
+        if(laneRaw < 0 || laneRaw > n-1) outside++;
+        let h = null;
+        if((it.type === 'coin' || it.type === 'bottle') && it.h !== undefined && it.h !== null && isFinite(Number(it.h))){
+          const hr = Math.max(0, Math.min(5, Number(it.h)));
+          h = Math.round(hr*2)/2;
+          if(h !== hr) snapped++;
+        }
+        return { type: it.type, lane: Math.max(0, Math.min(n-1, laneRaw)), z, flipped: !!it.flipped, model, h };
+      });
+    const maxZ = items.reduce((m,it)=>Math.max(m,it.z), 0);
+    const length = Math.max(8, Math.round(Number(seg.length)||24), maxZ);
+    let g = 0; items.forEach(it=>{ g = gcd(g, it.z); });
+    const step = g > 0 ? g : (Number(segStep.value)||4);
+
+    // číslo segmentu: z id, jinak z názvu souboru
+    let idNum = parseInt(seg.id, 10);
+    if(!(idNum >= 1)){ const m = /segment_(\d+)/i.exec(fileName||''); idNum = m ? parseInt(m[1],10) : Number(segId.value)||1; }
+
+    segId.value = idNum;
+    segName.value = seg.name ? String(seg.name) : '';
+    segLen.value = length;
+    segStep.value = step;
+    segBiome.value = BIOME_IDS.indexOf(seg.biome) >= 0 ? seg.biome : '';
+    segAlign.value = ALIGN_IDS.indexOf(seg.align) >= 0 ? seg.align : '';
+    updateAlignHint();
+    lanes = n;
+
+    cells = []; coll = [];
+    ensureCellsSize();
+    let overlap = 0;
+    items.forEach(it=>{
+      const r = Math.round(it.z / step);
+      if(it.type === 'coin' || it.type === 'bottle'){
+        const tk = tok(it.type, it.h), arr = coll[r][it.lane];
+        if(arr.indexOf(tk) < 0) arr.push(tk);
+        return;
+      }
+      const t = it.type === 'car' ? (it.flipped ? 'carf:' : 'car:') + it.model : it.type;
+      if(cells[r][it.lane] !== 'empty') overlap++;
+      cells[r][it.lane] = t;
+    });
+    buildPalette(); renderLaneUi(); renderGrid();
+    grid.scrollTop = 0;
+    updateOutput();
+
+    let msg = 'Načteno: ' + (fileName||'segment') + ' (' + items.length + ' položek, ' + n + ' pruhy)';
+    if(rounded) msg += ' — hodnoty z zaokrouhleny na celá čísla';
+    if(unknownModel) msg += ' — ' + unknownModel + ' neznámých modelů aut nahrazeno sedanem';
+    if(overlap) msg += ' — ' + overlap + ' překrývajících se položek, zůstala poslední';
+    if(outside) msg += ' — ' + outside + ' položek mimo silnici přesunuto do krajního pruhu';
+    if(snapped) msg += ' — ' + snapped + ' výšek zaokrouhleno na půl jednotky';
+    showToast(msg, (rounded||overlap||unknownModel||outside||snapped) ? 3600 : 2200);
+  }
+
+  document.getElementById('btnLoad').addEventListener('click', ()=>fileInput.click());
+  fileInput.addEventListener('change', ()=>{
+    const f = fileInput.files && fileInput.files[0];
+    if(!f) return;
+    const rd = new FileReader();
+    rd.onload = ()=>{
+      try{
+        const seg = parseSegmentText(String(rd.result));
+        if(!seg){ showToast('V souboru jsem nenašel žádný segment', 2600); return; }
+        applySegment(seg, f.name);
+      }catch(err){ showToast('Soubor nelze načíst: ' + err.message, 3200); }
+    };
+    rd.readAsText(f);
+    fileInput.value = '';
+  });
+
+  // ================= TEST VE HŘE (iframe) =================
+  const frame = document.getElementById('gameFrame');
+  const testPanel = document.getElementById('testPanel');
+  const ghostChk = document.getElementById('ghostChk');
+  const autoChk = document.getElementById('autoChk');
+  const frameWarn = document.getElementById('frameWarn');
+  let frameActive = false, frameReady = false, waitT = null, autoT = null;
+
+  // Najde nejnovější verzi hry ve složce: pee-runner_000.html ... pee-runner_080.html
+  // (zkusí všechna čísla naráz, bere nejvyšší existující; záloha = pee-runner-3.html).
+  async function najdiNejnovejsiHru(){
+    const probes = [];
+    for(let i=0;i<=80;i++){
+      const name = 'pee-runner_' + String(i).padStart(3,'0') + '.html';
+      probes.push(fetch(name, {method:'HEAD'}).then(r=>r.ok ? i : -1).catch(()=>-1));
+    }
+    const res = await Promise.all(probes);
+    const best = Math.max.apply(null, res);
+    return best >= 0 ? 'pee-runner_' + String(best).padStart(3,'0') + '.html' : 'pee-runner-3.html';
+  }
+
+  function buildPayload(){
+    return { type:'pr-test-segment', ghost: ghostChk.checked, segment:{
+      id: pad4(segId.value), name: segName.value.trim(),
+      length: Math.max(8, Math.round(Number(segLen.value)||24)), lanes: lanes, align: segAlign.value || undefined, biome: segBiome.value || undefined, items: buildItems() } };
+  }
+  function sendTest(){
+    if(frameReady && frame.contentWindow) frame.contentWindow.postMessage(buildPayload(), '*');
+  }
+  function scheduleAuto(){
+    if(!autoChk.checked || !frameActive || !frameReady) return;
+    clearTimeout(autoT); autoT = setTimeout(sendTest, 450);
+  }
+  async function runTest(){
+    testPanel.classList.add('show');
+    testPanel.scrollIntoView({behavior:'smooth', block:'start'});
+    const src = await najdiNejnovejsiHru();
+    if(!frameActive || frame.getAttribute('data-src') !== src){
+      frameReady = false; frameActive = true; frameWarn.style.display = 'none';
+      frame.setAttribute('data-src', src);
+      frameWarn.textContent = 'Hra se nenačetla (zkoušel jsem ' + src + '). Zkontroluj, že soubor hry leží ve stejné složce jako tenhle editor.';
+      frame.src = src;
+      clearTimeout(waitT);
+      waitT = setTimeout(()=>{ if(!frameReady) frameWarn.style.display = 'block'; }, 8000);
+    } else {
+      sendTest();
+    }
+  }
+
+  // Hra po načtení pošle 'pr-ready' - teprve pak jí posíláme aktuální segment.
+  window.addEventListener('message', e=>{
+    if(e.source !== frame.contentWindow || !e.data || e.data.type !== 'pr-ready') return;
+    frameReady = true; clearTimeout(waitT); frameWarn.style.display = 'none';
+    sendTest();
+  });
+
+  document.getElementById('btnTest').addEventListener('click', runTest);
+  ghostChk.addEventListener('change', ()=>{ if(frameActive) sendTest(); });
+  document.getElementById('btnBack').addEventListener('click', ()=>{
+    document.getElementById('gridPanel').scrollIntoView({behavior:'smooth', block:'start'});
+  });
+  document.getElementById('btnStop').addEventListener('click', ()=>{
+    clearTimeout(waitT); clearTimeout(autoT);
+    frame.src = 'about:blank'; frame.removeAttribute('data-src');
+    frameActive = false; frameReady = false; frameWarn.style.display = 'none';
+    testPanel.classList.remove('show');
+  });
+
+  const savedNext = lsGet('pr_seg_next_id');
+  if(savedNext) segId.value = savedNext;
+
+  updateAlignHint();
+  buildPalette();
+  renderLaneUi();
+  renderGrid();
+  updateOutput();
+})();
+</script>
+</body>
+</html>
